@@ -1,0 +1,77 @@
+syntax="proto3";
+package RaftRpc;
+//Raft节点状态
+enum RaftState
+{
+    RAFT_FOLLOWER=0;
+    RAFT_CANDIDATE=1;
+    RAFT_LEADER=2;
+    //RAFT_PRECANDIDATE=3;
+}
+
+//日志
+message LogEntry
+{
+    bytes Command=1; //日志命令类型
+    int32 LogTerm=2; //日志的任期
+    int32 LogIndex=3; //日志的索引
+}
+
+//Raft的基本通信
+message AppendEntriesArgs
+{
+    int32 Term=1; //消息的任期
+    int32 LeaderId=2; //领导者id
+    int32 PreLogIndex=3; //前一条日志的索引
+    int32 PreLogTerm=4; //前一条日志的任期
+    repeated LogEntry Entries=5; //发送的日志 如果为心跳消息，则为空
+    int32 LeaderCommit=6; //领导者最新提交索引
+}
+//通信响应
+message AppendEntriesReply
+{
+    int32 Term=1; //跟随者认为的当前领导者任期
+    bool Succss=2; //跟随者是否接收成功
+    int32 UpdateNextIndex=3; //根据跟随者的updateNextIndex值，领导者可以调整该跟随者的Next值
+    int32 Status = 4; //跟随者状态
+}
+//投票请求
+message RequestVoteArgs
+{
+    int32 Term=1; //当前任期 跟随者会在发送前自增任期
+    int32 CandidateId=2; //当前候选者的id
+    //这两项用于让系统拒绝给落后候选者投票
+    int32 LastLogTerm=3;
+    int32 LastLogIndex=4;
+}
+//投票响应
+message RequestVoteReply
+{
+    int32 Term=1; //告诉候选者当前节点已知的系统最新任期 可以通过此数据让
+    bool VoteGranted=2; //是否投给请求的候选者
+    int32 VoteState=3; //当前节点状态
+}
+
+//快照下载
+message InstallSnapshotArgs
+{
+    int32 LeaderId=1;
+    int32 Term=2;
+    //最后被丢弃的日志索引 用于一致性检查
+    int32 LastSnapShotIncludeIndex=3;
+    int32 LastSnapShotIncludeTerm=4;
+    bytes Data=5; //快照数据
+    int32 Offset=6; //当前数据相较于起始快照的偏移量
+}
+
+message InstallSnapshotReply
+{
+    int32 Term=1;
+}
+
+service RaftRpc
+{
+    rpc RequestVote(RequestVoteArgs) returns(RequestVoteReply);
+    rpc AppendEntries(stream AppendEntriesArgs) returns(stream AppendEntriesReply); //AppendEntries用双向流
+    rpc InstallSnapshot(stream InstallSnapshotArgs) returns(stream InstallSnapshotReply); //InstallSnapshot用单向流
+}

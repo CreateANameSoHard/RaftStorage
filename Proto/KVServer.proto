@@ -1,0 +1,46 @@
+syntax="proto3";
+package ServerRpc;
+//KVServer的Rpc通信定义 位于Raft的上层
+
+//给Raft的提供的操作
+//op和PutAppendArgs一样 但作用不同 op不用于Rpc
+message Op
+{
+    bytes Operation = 1;
+    bytes Key = 2;
+    bytes Value = 3;
+    bytes ClientId = 4;
+    int32 RequestId = 5;
+}
+//Get请求
+message GetArgs
+{
+    bytes Key = 1;
+    bytes ClientId = 2;
+    int32 RequestId = 3;
+}
+//Get响应
+message GetReply
+{
+    bytes Err = 1;
+    bytes Value = 2;
+}
+//Put or Append
+message PutAppendArgs
+{
+    bytes Key = 1;
+    bytes Value = 2;
+    bytes Op = 3;
+    bytes ClientId = 4;
+    int32 RequestId = 5;
+}
+message PutAppendReply
+{
+    bytes Err = 1;
+}
+
+service KVServerRpc
+{
+    rpc Get(GetArgs) returns(GetReply);
+    rpc PutAppend(PutAppendArgs) returns(PutAppendReply);
+}
