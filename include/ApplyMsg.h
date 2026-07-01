@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 
+#include "../include/json.hpp"
+
 // Raft节点和KVServer的通信数据
 class ApplyMsg
 {
@@ -15,13 +17,11 @@ public:
           SnapshotIndex_(-1)
     {
     }
-
-private:
-    bool CommandValid_;   // 命令有效性
-    std::string Command_; // 命令
+    bool CommandValid_;   // 是否为一般命令
+    std::string Command_; // 命令内容
     int CommandIndex_;    // 命令索引
     bool SnapshotValid_;  // 是否以作为快照保存
-    std::string Snapshot_;
-    int SnapshotTerm_;
-    int SnapshotIndex_;
+    nlohmann::json Snapshot_; // 快照内容
+    int SnapshotTerm_; // 快照term
+    int SnapshotIndex_; // 快照索引
 };

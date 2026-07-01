@@ -35,7 +35,7 @@ std::chrono::milliseconds getRandomizedElectionTimeOut()
 {
     std::random_device rd; //随机数引擎
     std::mt19937 rng(rd()); //mt19937算法
-    std::uniform_int_distribution<int> distribution(MinRandomizedElectionTime, MaxRandomizedElectionTime);
+    std::uniform_int_distribution<int> distribution(MinRandomizedElectionTime, MaxRandomizedElectionTime); // 均匀分布发生器
     return std::chrono::milliseconds(distribution(rng));
 }
 void sleepNMilliseconds(int N)

@@ -1,10 +1,13 @@
 #include "../include/Persister.h"
 #include "../include/Util.h"
 
+
+
 Persister::Persister(int placeholder)
-    : raftStateFileName_("RaftStatePersist" + std::to_string(placeholder) + ".txt"),
-    snapShotFileName_("SnapShotPersist" + std::to_string(placeholder) + ".txt"),
-    raftStateSize_(0)
+    : raftStateFileName_("RaftStatePersist" + std::to_string(placeholder) + ".json"),
+    snapShotFileName_("SnapShotPersist" + std::to_string(placeholder) + ".json"),
+    raftStateSize_(0),
+    snapshotSize_(0)
 {
     //试着打开两个文件 如果有一个打不开则flag为false
     bool fileOpenFlag = true;
@@ -45,8 +48,16 @@ void Persister::save(const std::string& raftState, const std::string& snapShot)
     std::unique_lock<std::shared_mutex> write_lock(mutex_);
     //清理对象 写入文件持久化
     clearRaftStateAndSnapShot();
+    json raftState_json = json::parse(raftState);
     raftStateWriter_ << raftState;
+    raftStateSize_ += raftState_json.size();
+
+    json snapshot_json = json::parse(snapShot);
     snapShotWriter_ << snapShot;
+    snapshotSize_ += snapshot_json.size();
+
+    raftStateWriter_.flush();
+    snapShotWriter_.flush();
 }
 
 std::string Persister::readRaftState()
@@ -58,25 +69,41 @@ std::string Persister::readRaftState()
     if(!istream.good())
         return "";
 
-    std::string snapShot;
-    istream >> snapShot;
-    istream.close();
-    return snapShot;
+    try
+    {
+        json state;
+        istream >> state;  // 可能抛出 parse_error
+        istream.close();
+        return state.dump(4);  // 返回格式化的 JSON 字符串
+    }
+    catch (const nlohmann::json::parse_error& e)
+    {
+        // 文件内容为空或格式错误，返回空字符串
+        DPrintf("[Persister] readRaftState parse error: %s", e.what());
+        return "";
+    }
 }
 
 void Persister::saveRaftState(const std::string& v)
 {
     std::unique_lock<std::shared_mutex> write_lock(mutex_);
     clearRaftState();
-    raftStateWriter_ << v;
-    raftStateSize_ += v.size();
+    json j = json::parse(v);
+    raftStateWriter_ << j;
+    // 如果长期持有流对象 就应该写了后刷新缓冲 更何况这是Raft的场景 有必要立即写到磁盘
+    raftStateWriter_.flush();
+    raftStateSize_ += j.size();
 }
 
 long long Persister::raftStateSize()
 {
     return raftStateSize_.load(std::memory_order_relaxed);
 }
-
+long long Persister::snapshotSize()
+{
+    return snapshotSize_.load(std::memory_order_relaxed);
+}
+// only use for json
 std::string Persister::readSnapShot()
 {
     std::shared_lock<std::shared_mutex> read_lock(mutex_);
@@ -90,10 +117,10 @@ std::string Persister::readSnapShot()
 
     std::fstream istream(snapShotFileName_, std::ios_base::in);
     if(!istream.good()) return "";
-    std::string snapshot;
+    json snapshot;
     istream >> snapshot;
     istream.close();
-    return snapshot;
+    return snapshot.dump(4);
 }
 //重新打开RaftStateFile
 void Persister::clearRaftState()

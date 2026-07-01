@@ -12,6 +12,7 @@
 
 #include "KVServer.pb.h"
 #include "Config.h"
+#include "json.hpp"
 // 模拟GoLang的Defer关键字 让func在对象析构时执行
 // 作用域保护器 ScopeGuard
 template <class F>
@@ -53,7 +54,7 @@ private:
     这些都会在函数栈最后释放前执行
 */
 #define DEFER _MAKE_DEFER_(__LINE__)
-//Debug printf
+// Debug printf
 void DPrintf(const char *format, ...);
 // 对断言的封装 增强判断
 void myAssert(bool condition, std::string msg = "Assertion failed!");
@@ -133,47 +134,68 @@ private:
     std::condition_variable cv_;
 };
 
+using nlohmann::json;
 // KVServer传给Raft的操作 相当于上层KVServer传给下层Raft节点的日志内容
+// TODO:用json进行序列化
 class Op
 {
 public:
-    std::string operation; // Get Put Del等
-    std::string key;
-    std::string value;
-    std::string clientId; // 客户端id
-    int requestId;        // 请求id 按照raft一致性要求 请求id需要持久化
-
     // 序列化为字符串
     std::string asString() const
     {
-        ServerRpc::Op op;
-        op.set_operation(operation);
-        op.set_key(key);
-        op.set_value(value);
-        op.set_clientid(clientId);
-        op.set_requestid(requestId);
-        std::string output;
-        op.SerializeToString(&output);
-        return output;
+        json j;
+        j["operation"] = operation;
+        j["key"] = key;
+        j["value"] = value;
+        j["clientId"] = clientId;
+        j["requestId"] = requestId;
+        return j.dump(4);
     }
 
     bool parseFromString(std::string &str)
     {
-        ServerRpc::Op op;
-        if (op.ParseFromString(str))
-        {
-            this->operation = op.operation();
-            this->key = op.key();
-            this->value = op.value();
-            this->clientId = op.clientid();
-            this->requestId = op.requestid();
-            return true;
-        }
+        if (str.empty())
+            return false;
+
+        bool flag = true;
+        json j = json::parse(str);
+        if (j.contains("operation") && j["operation"].is_string())
+            operation = j["operation"];
         else
         {
-            std::cout << "something wrong while parseFromString in protobuf" << std::endl;
-            return false;
+            std::cout << "Op parseFrom string error, operation missing" << std::endl;
+            flag = false;
         }
+
+        if (j.contains("key") && j["key"].is_string())
+            key = j["key"];
+        else
+        {
+            std::cout << "Op parseFrom string error, key missing" << std::endl;
+            flag = false;
+        }
+        if (j.contains("value") && j["value"].is_string())
+            value = j["value"];
+        else
+        {
+            std::cout << "Op parseFrom string error, value missing" << std::endl;
+            flag = false;
+        }
+        if (j.contains("clientId") && j["clientId"].is_string())
+            clientId = j["clientId"];
+        else
+        {
+            std::cout << "Op parseFrom string error, clientId missing" << std::endl;
+            flag = false;
+        }
+        if (j.contains("requestId") && j["requestId"].is_number_integer())
+            requestId = j["requestId"];
+        else
+        {
+            std::cout << "Op parseFrom string error, requestId missing" << std::endl;
+            flag = false;
+        }
+        return flag;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const Op &op)
@@ -181,6 +203,12 @@ public:
         os << "[Op] Operation: " << op.operation << "Key: " << op.key << "Value: " << op.value << "ClientId: " << op.clientId << "RequestId: " << std::to_string(op.requestId);
         return os;
     }
+
+    std::string operation; // Get Put Del等
+    std::string key;
+    std::string value;
+    std::string clientId; // 客户端id
+    int requestId;        // 请求id 按照raft一致性要求 请求id需要持久化
 };
 
 const std::string OK = "OK";

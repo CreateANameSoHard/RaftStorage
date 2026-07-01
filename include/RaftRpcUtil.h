@@ -14,6 +14,7 @@ public:
     virtual ~AppendEntriesResponder() = default;
     virtual void SendReply(const RaftRpc::AppendEntriesReply *reply) = 0; //发送数据
     virtual void Close() = 0;
+    virtual bool Closed() const = 0;
 };
 class InstallSnapshotResponder
 {
@@ -21,6 +22,7 @@ public:
     virtual ~InstallSnapshotResponder() = default;
     virtual void SendReply(const RaftRpc::InstallSnapshotReply *reply) = 0; //发送数据
     virtual void Close() = 0;
+    virtual bool Closed() const = 0;
 };
 // Client同步流
 class AppendEntriesStream
@@ -30,6 +32,7 @@ public:
     virtual bool Write(const RaftRpc::AppendEntriesArgs *request) = 0;
     virtual bool Read(RaftRpc::AppendEntriesReply *reply) = 0;
     virtual void Close() = 0;
+    virtual bool Closed() const = 0;
 };
 class InstallSnapshotStream
 {
@@ -38,6 +41,7 @@ public:
     virtual bool Write(const RaftRpc::InstallSnapshotArgs *request) = 0;
     virtual bool Read(RaftRpc::InstallSnapshotReply *reply) = 0;
     virtual void Close() = 0;
+    virtual bool Closed() const = 0;
 };
 
 // 用于RaftServer回调
@@ -49,13 +53,13 @@ public:
 
     virtual void OnRequestVote(const RaftRpc::RequestVoteArgs *request, RaftRpc::RequestVoteReply *reply) = 0;
 
-    virtual void OnAppendEntriesStreamOn(std::unique_ptr<AppendEntriesResponder> responder) = 0; //在这里拷贝responder
-    virtual void OnAppendEntries(const RaftRpc::AppendEntriesArgs *request) = 0; //获取请求信息后 可以用responder发送响应
-    virtual void OnAppendEntriesStreamClose() = 0;
+    virtual void OnAppendEntriesStreamOn(std::unique_ptr<AppendEntriesResponder> responder, const std::string& peer) = 0; //在这里拷贝responder
+    virtual void OnAppendEntries(const RaftRpc::AppendEntriesArgs *request, const std::string& peer) = 0; //获取请求信息后 可以用responder发送响应
+    virtual void OnAppendEntriesStreamClose(const std::string& peer) = 0;
 
-    virtual void OnInstallSnapshotStreamOn(std::unique_ptr<InstallSnapshotResponder> responder) = 0;
-    virtual void OnInstallSnapshotChunk(const RaftRpc::InstallSnapshotArgs *request) = 0;
-    virtual void OnInstallSnapshotStreamClose() = 0;
+    virtual void OnInstallSnapshotStreamOn(std::unique_ptr<InstallSnapshotResponder> responder, const std::string& peer) = 0;
+    virtual void OnInstallSnapshotChunk(const RaftRpc::InstallSnapshotArgs *request, const std::string& peer) = 0;
+    virtual void OnInstallSnapshotStreamClose(const std::string& peer) = 0;
 };
 
 // 通信节点 不持有连接

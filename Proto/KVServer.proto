@@ -4,6 +4,7 @@ package ServerRpc;
 
 //给Raft的提供的操作
 //op和PutAppendArgs一样 但作用不同 op不用于Rpc
+// 没有使用到
 message Op
 {
     bytes Operation = 1;
