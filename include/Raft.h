@@ -1,13 +1,21 @@
 #pragma once
-#include <chrono>
-#include <mutex>
-#include <vector>
-#include <memory>
-#include <unordered_map>
 
-#include "../include/RaftRpcUtil.h"
-#include "../include/Util.h"
-#include "../include/ApplyMsg.h"
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+#include "ApplyMsg.h"
+#include "RaftRpcUtil.h"
+#include "Util.h"
 
 class ThreadPool;
 class Persister;
@@ -15,153 +23,178 @@ class Persister;
 class Raft : public RaftRpcHandler
 {
 public:
-    Raft(std::string, std::string, std::unordered_map<int, const std::string> idToAddr, int id, std::shared_ptr<Persister> persister, std::shared_ptr<LockQueue<ApplyMsg>> applyQueue);
+    Raft(std::string ip, std::string port,
+         std::unordered_map<int, const std::string> idToAddr,
+         int id,
+         std::shared_ptr<Persister> persister,
+         std::shared_ptr<LockQueue<ApplyMsg>> applyQueue);
     ~Raft();
-    // 上层接口
-    void start(Op command, int *newLogIndex, int *newLogTerm, bool *isLeader);
 
-    void OnRequestVote(const RaftRpc::RequestVoteArgs *request, RaftRpc::RequestVoteReply *reply) override;
+    Raft(const Raft &) = delete;
+    Raft &operator=(const Raft &) = delete;
 
-    void OnAppendEntriesStreamOn(std::unique_ptr<AppendEntriesResponder> responder, const std::string &peer) override;
-    void OnAppendEntries(const RaftRpc::AppendEntriesArgs *request, const std::string &peer) override;
+    void start(Op command, int *newLogIndex, int *newLogTerm, bool *isLeader); // 向Raft提交命令
+
+    void OnRequestVote(const RaftRpc::RequestVoteArgs *request,
+                       RaftRpc::RequestVoteReply *reply) override;
+    void OnAppendEntriesStreamOn(std::unique_ptr<AppendEntriesResponder> responder,
+                                 const std::string &peer) override;
+    void OnAppendEntries(const RaftRpc::AppendEntriesArgs *request,
+                         const std::string &peer) override;
     void OnAppendEntriesStreamClose(const std::string &peer) override;
-
-    void OnInstallSnapshotStreamOn(std::unique_ptr<InstallSnapshotResponder> responder, const std::string &peer) override;
-    void OnInstallSnapshotChunk(const RaftRpc::InstallSnapshotArgs *request, const std::string &peer) override;
+    void OnInstallSnapshotStreamOn(std::unique_ptr<InstallSnapshotResponder> responder,
+                                   const std::string &peer) override;
+    void OnInstallSnapshotChunk(const RaftRpc::InstallSnapshotArgs *request,
+                                const std::string &peer) override;
     void OnInstallSnapshotStreamClose(const std::string &peer) override;
 
-    void doHeartBeat(); // 发送心跳 only for leader
-    void doElection();  // 发送选举
-
-    void SendRequestVote(int server, std::shared_ptr<RaftRpc::RequestVoteArgs>, std::shared_ptr<RaftRpc::RequestVoteReply>, std::shared_ptr<std::atomic_int>); // 封装超时
-    int SendAppendEntries(int server, std::shared_ptr<RaftRpc::AppendEntriesArgs>, std::shared_ptr<RaftRpc::AppendEntriesReply>);                              // 封装同步读写和超时
-
-    void applierTicker();
-    void electionTimeOutTicker(); // 定时器用于检测消息超时 如果超时了则发起选举
-    void leaderHeartBeatTicker();
-    void snapshotCheckTicker();
-
-    void takeSnapshot();
-
-    void leaderSendSnapshot(int server); // 发送快照给落后follower
-
-    void updateCommitIndex();                 // 统计peers的matchIndex 根据节点的提交信息来更新commitIndex 要注意延迟提交机制
-    bool matchLog(int logIndex, int logTerm); // 匹配日志信息 即logIndex的term和logTerm是否一致 用于查看是否有心跳的日志
-    void persist();                           // 持久化raft节点易失性状态 currentTerm log votedFor lastIncludeSnapshotIndex lastIncludeSnapshotTerm
-    bool whetherVoteFor(int index, int term); // 判断index和term是否比当前节点更新 用于选举限制
-
-    int getNewCommandIndex();                                     // 获取新命令所需的index
-    void getPrevLogInfo(int server, int *preIndex, int *preTerm); // 获取对应id的preIndex和preTerm preIndex和preTerm为传出参数
-    void getState(int *term, bool *isLeader);                     // 返回节点的currentTerm 和 状态
-    int getLastLogIndex();                                        // 获取lastLogIndex
-    int getLastLogTerm();                                         // 获取lastLogTerm
+    void updateCommitIndex();
+    bool matchLog(int logIndex, int logTerm);
+    void persist();
+    bool whetherVoteFor(int index, int term);
+    int getNewCommandIndex();
+    void getPrevLogInfo(int server, int *preIndex, int *preTerm);
+    void getState(int *term, bool *isLeader);
+    int getLastLogIndex();
+    int getLastLogTerm();
     void getLastLogIndexAndTerm(int *lastLogIndex, int *lastLogTerm);
-    int getLogTermFromIndex(int logIndex); // logIndex为逻辑index 而不是logs的物理index
+    int getLogTermFromIndex(int logIndex);
     int getRaftStateSize();
-    int getSlicesIndexFromLogIndex(int logIndex); // logIndex和数组的index不是一个值 所以需要映射 lastIncludeSnapshotIndex的下一个日志视为0位置的日志
-
-    std::vector<ApplyMsg> getApplyLogs(); // 获取即将提交给状态机的logs 即从lastApplied到lastLogIndex之间的日志内容
+    int getSlicesIndexFromLogIndex(int logIndex);
+    std::vector<ApplyMsg> getApplyLogs();
     void pushMsgToKvServer(ApplyMsg msg);
-    void readPersist(std::string v); // 从string（序列化为string的raft状态值）里读取状态并赋值给this对象
+    void readPersist(std::string value);
     std::string persistData();
 
-    // For Debug
+    // for debug
     std::unordered_map<int, const std::string> getIdToAddr() const { return idToAddr_; }
     std::unordered_map<std::string, int> getAddrToId() const { return addrToId_; }
     std::unordered_map<int, std::shared_ptr<grpc::Channel>> getPeers() const { return peers_; }
     std::shared_ptr<Persister> getPersister() const { return persister_; }
-
     int getId() const { return id_; }
-    int getCurrentTerm() const { return currentTerm_; }
-    int getVotedFor() const { return votedFor_; }
-    std::vector<RaftRpc::LogEntry> getLogs() const { return logs_; }
 
-    int getCommitIndex() const { return commitIndex_; }
-    int getLastApplied() const { return lastApplied_; }
-    std::unordered_map<int, int> getNextIndex() const { return nextIndex_; }
-    std::unordered_map<int, int> getMatchIndex() const { return matchIndex_; }
-
-    RaftRpc::RaftState getStatus() const { return status_; }
+    int getCurrentTerm();
+    int getVotedFor();
+    std::vector<RaftRpc::LogEntry> getLogs();
+    int getCommitIndex();
+    int getLastApplied();
+    std::unordered_map<int, int> getNextIndex();
+    std::unordered_map<int, int> getMatchIndex();
+    RaftRpc::RaftState getStatus();
     bool getStop() const { return stop_.load(); }
-    std::thread *getLeaderHeartBeatTickerThread() const { return leaderHeartBeatTickerThread_.get(); }
-    std::thread *getElectionTimeOutTickerThread() const { return electionTimeOutTickerThread_.get(); }
-    std::thread *getApplierTickerThread() const { return applierTickerThread_.get(); }
 
     std::shared_ptr<LockQueue<ApplyMsg>> getApplyQueue() const { return applyQueue_; }
-
-    std::chrono::steady_clock::time_point getLastResetElectionTime() const { return lastResetElectionTime_; }
-    std::chrono::steady_clock::time_point LastResetHeartBeatTime() const { return lastResetHeartBeatTime_; }
-
-    int getLastIncludeSnapshotIndex() const { return lastIncludeSnapshotIndex_; }
-    int getLastIncludeSnapshotTerm() const { return lastIncludeSnapshotTerm_; }
-
-    void setSnapshotCallback(const std::function<std::string()> &gen)
-    {
-        genSnapshotCallback_ = gen;
-    }
+    std::chrono::steady_clock::time_point getLastResetElectionTime();
+    std::chrono::steady_clock::time_point LastResetHeartBeatTime();
+    int getLastIncludeSnapshotIndex();
+    int getLastIncludeSnapshotTerm();
+    void setSnapshotCallback(const std::function<std::string()> &generator);
 
 private:
-    // int getIdByAddr(const std::string addr);
-    const std::string getAddrById(int id);
-    
-    void scheduleReplicationLocked(int id); // 复制调度(需要有锁)
-    void replicationWorker(int id); // worker执行内容
-    std::shared_ptr<RaftRpc::AppendEntriesArgs> buildAppendEntriesLocked(int id); // 构建请求内容
+    using Event = std::function<void()>;
+    using Clock = std::chrono::steady_clock;
 
-    std::unique_ptr<ThreadPool> threadPool_;
-    
-    std::unordered_map<int, bool> replicationInFlight_; // 每个follower是否已有复制 worker
-    std::unordered_map<int, bool> replicationPending_; // worker 执行期间是否又产生了新日志或新心跳
-
+    struct StartResult
+    {
+        int index{-1};
+        int term{-1};
+        bool leader{false};
+    };
     struct ServerSession
     {
         std::unique_ptr<AppendEntriesResponder> AEResponder;
         std::unique_ptr<InstallSnapshotResponder> ISResponder;
     };
+
+    void postControl(Event event);
+    void postCommand(Event event);
+    void eventLoop();         // 事件循环 现在整个Raft状态机是无锁的
+    void processEventBatch(); // 执行事件队列的事件
+    void handleDeadlines();
+    void resetElectionDeadline();
+    void resetHeartbeatDeadline();
+    void beginElection();
+    void becomeFollower(int term);
+    void becomeLeader();
+    void scheduleAllReplication();
+    void scheduleReplication(int server);
+    void launchAppendEntries(int server, RaftRpc::AppendEntriesArgs request);
+    void launchSnapshot(int server, RaftRpc::InstallSnapshotArgs request);
+    void handleVoteReply(int server, int requestTerm, bool transportOk,
+                         RaftRpc::RequestVoteReply reply);
+    void handleAppendReply(int server, int requestTerm,
+                           RaftRpc::AppendEntriesArgs request,
+                           bool transportOk, RaftRpc::AppendEntriesReply reply);
+    void handleSnapshotReply(int server, int requestTerm, bool transportOk,
+                             RaftRpc::InstallSnapshotReply reply);
+    void handleRequestVote(const RaftRpc::RequestVoteArgs &request,
+                           RaftRpc::RequestVoteReply *reply);
+    void handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int server);
+    void handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request, int server);
+    void applyCommitted();
+    void maybeTakeSnapshot();
+    RaftRpc::AppendEntriesArgs buildAppendEntries(int server);
+    const std::string getAddrById(int id);
+
+    // 封装查询控制 getter可以直接据此查询
+    template <typename T>
+    T query(std::function<T()> reader)
+    {
+        if (std::this_thread::get_id() == eventThreadId_)
+            return reader();
+        auto promise = std::make_shared<std::promise<T>>();
+        auto future = promise->get_future();
+        postControl([promise, reader = std::move(reader)]() mutable
+                    { promise->set_value(reader()); });
+        return future.get();
+    }
+
     std::string ip_;
     std::string port_;
-
-    std::mutex mutex_; //TODO:优化锁粒度
-    std::unordered_map<int, const std::string> idToAddr_;
+    const std::unordered_map<int, const std::string> idToAddr_;
     std::unordered_map<std::string, int> addrToId_;
-
     std::unordered_map<int, std::shared_ptr<grpc::Channel>> peers_;
     std::unique_ptr<RaftServer> server_;
     std::unordered_map<int, std::unique_ptr<RaftClient>> clients_;
-    // 局部流 就不需要在这里注册了
-    // std::unordered_map<int, Raft::FollowerSession> streamClient_;
-    std::unordered_map<int, Raft::ServerSession> streamServer_;
+    std::unordered_map<int, ServerSession> streamServer_;
+    std::unique_ptr<ThreadPool> threadPool_;
 
-    std::shared_ptr<Persister> persister_;             // 持久化器
-    std::function<std::string()> genSnapshotCallback_; // status machine->Raft
-    // 上层直接通过applyQueue来apply快照了
-    // std::function<void(const std::string&)> applySnapshotCallback_; // Raft->status machine
+    std::mutex queueMutex_;
+    std::condition_variable queueCv_;
 
-    // 需要持久化的四个节点状态
-    int id_;                              // 节点编号
-    int currentTerm_;                     // 节点已知的term 需要持久化
-    int votedFor_;                        // 投票对象 需要持久化
-    std::vector<RaftRpc::LogEntry> logs_; // 日志数组 需要持久化
+    // 双队列 能保证control不会因为command过多而不执行
+    std::deque<Event> controlQueue_; // 控制队列 高优先级
+    std::deque<Event> commandQueue_; // 命令队列 低优先级
+    std::thread eventThread_;
+    std::thread::id eventThreadId_;
+    bool eventLoopStopping_{false}; // 事件队列关闭标志
+    std::atomic_bool stop_{false};
 
-    // 下列状态不需要持久化
-    int commitIndex_;                         // 节点的已提交索引 注意分辨leadercommit和commitIndex
-    int lastApplied_;                         // 最后一个提交给状态机的日志索引
-    std::unordered_map<int, int> nextIndex_;  // nextIndex数组
-    std::unordered_map<int, int> matchIndex_; // matchIndex数组
+    std::shared_ptr<Persister> persister_;
+    std::shared_ptr<LockQueue<ApplyMsg>> applyQueue_;
+    std::function<std::string()> genSnapshotCallback_; // 上层的回调 用于生成快照
 
-    RaftRpc::RaftState status_; // 节点状态
-    std::atomic_bool stop_;
-    std::unique_ptr<std::thread> leaderHeartBeatTickerThread_;
-    std::unique_ptr<std::thread> electionTimeOutTickerThread_;
-    std::unique_ptr<std::thread> applierTickerThread_;
-    std::unique_ptr<std::thread> snapshotCheckThread_;
+    int id_;
+    int currentTerm_{0};
+    int votedFor_{-1};
+    std::vector<RaftRpc::LogEntry> logs_;
+    int commitIndex_{0};
+    int lastApplied_{0};
+    std::unordered_map<int, int> nextIndex_;
+    std::unordered_map<int, int> matchIndex_;
+    // 每个follower一个worker 这样可以降低rpc数量
+    std::unordered_map<int, bool> replicationInFlight_; // 与各个follower是否有worker
+    std::unordered_map<int, bool> replicationPending_; // 各个follower是否有事件pending
+    RaftRpc::RaftState status_{RaftRpc::RAFT_FOLLOWER};
+    int votesGranted_{0};
+    int electionTerm_{0};
 
-    std::shared_ptr<LockQueue<ApplyMsg>> applyQueue_; // Server与Raft的通信接口
+    Clock::time_point lastResetElectionTime_;
+    Clock::time_point lastResetHeartBeatTime_;
+    Clock::time_point electionDeadline_;
+    Clock::time_point heartbeatDeadline_;
+    Clock::time_point snapshotDeadline_; // snapshot超时时间 通过轮询检查内存日志数量来决定是否生成快照
 
-    std::chrono::steady_clock::time_point lastResetElectionTime_;  // 上次重置选举的时间点
-    std::chrono::steady_clock::time_point lastResetHeartBeatTime_; // 上次重置心跳的时间点
-
-    // 保存的快照信息
-    int lastIncludeSnapshotIndex_;
-    int lastIncludeSnapshotTerm_;
+    int lastIncludeSnapshotIndex_{0};
+    int lastIncludeSnapshotTerm_{0};
 };
