@@ -39,6 +39,10 @@ public:
     void applierTicker();
     void electionTimeOutTicker(); // 定时器用于检测消息超时 如果超时了则发起选举
     void leaderHeartBeatTicker();
+    void snapshotCheckTicker();
+
+    void takeSnapshot();
+
     void leaderSendSnapshot(int server); // 发送快照给落后follower
 
     void updateCommitIndex();                 // 统计peers的matchIndex 根据节点的提交信息来更新commitIndex 要注意延迟提交机制
@@ -61,7 +65,7 @@ public:
     void readPersist(std::string v); // 从string（序列化为string的raft状态值）里读取状态并赋值给this对象
     std::string persistData();
 
-    //For Debug
+    // For Debug
     std::unordered_map<int, const std::string> getIdToAddr() const { return idToAddr_; }
     std::unordered_map<std::string, int> getAddrToId() const { return addrToId_; }
     std::unordered_map<int, std::shared_ptr<grpc::Channel>> getPeers() const { return peers_; }
@@ -72,16 +76,16 @@ public:
     int getVotedFor() const { return votedFor_; }
     std::vector<RaftRpc::LogEntry> getLogs() const { return logs_; }
 
-     int getCommitIndex() const { return commitIndex_; }
-    int getLastApplied() const { return lastApplied_;}
-    std::unordered_map<int,int> getNextIndex() const { return nextIndex_; }
-    std::unordered_map<int,int> getMatchIndex() const { return matchIndex_; }
+    int getCommitIndex() const { return commitIndex_; }
+    int getLastApplied() const { return lastApplied_; }
+    std::unordered_map<int, int> getNextIndex() const { return nextIndex_; }
+    std::unordered_map<int, int> getMatchIndex() const { return matchIndex_; }
 
     RaftRpc::RaftState getStatus() const { return status_; }
     bool getStop() const { return stop_.load(); }
-    std::thread* getLeaderHeartBeatTickerThread() const { return leaderHeartBeatTickerThread_.get(); }
-    std::thread* getElectionTimeOutTickerThread() const { return electionTimeOutTickerThread_.get(); }
-    std::thread* getApplierTickerThread() const { return applierTickerThread_.get(); }
+    std::thread *getLeaderHeartBeatTickerThread() const { return leaderHeartBeatTickerThread_.get(); }
+    std::thread *getElectionTimeOutTickerThread() const { return electionTimeOutTickerThread_.get(); }
+    std::thread *getApplierTickerThread() const { return applierTickerThread_.get(); }
 
     std::shared_ptr<LockQueue<ApplyMsg>> getApplyQueue() const { return applyQueue_; }
 
@@ -91,11 +95,23 @@ public:
     int getLastIncludeSnapshotIndex() const { return lastIncludeSnapshotIndex_; }
     int getLastIncludeSnapshotTerm() const { return lastIncludeSnapshotTerm_; }
 
+    void setSnapshotCallback(const std::function<std::string()> &gen)
+    {
+        genSnapshotCallback_ = gen;
+    }
+
 private:
     // int getIdByAddr(const std::string addr);
     const std::string getAddrById(int id);
+    
+    void scheduleReplicationLocked(int id); // 复制调度(需要有锁)
+    void replicationWorker(int id); // worker执行内容
+    std::shared_ptr<RaftRpc::AppendEntriesArgs> buildAppendEntriesLocked(int id); // 构建请求内容
 
     std::unique_ptr<ThreadPool> threadPool_;
+    
+    std::unordered_map<int, bool> replicationInFlight_; // 每个follower是否已有复制 worker
+    std::unordered_map<int, bool> replicationPending_; // worker 执行期间是否又产生了新日志或新心跳
 
     struct ServerSession
     {
@@ -105,7 +121,7 @@ private:
     std::string ip_;
     std::string port_;
 
-    std::mutex mutex_;
+    std::mutex mutex_; //TODO:优化锁粒度
     std::unordered_map<int, const std::string> idToAddr_;
     std::unordered_map<std::string, int> addrToId_;
 
@@ -116,7 +132,10 @@ private:
     // std::unordered_map<int, Raft::FollowerSession> streamClient_;
     std::unordered_map<int, Raft::ServerSession> streamServer_;
 
-    std::shared_ptr<Persister> persister_; // 持久化器
+    std::shared_ptr<Persister> persister_;             // 持久化器
+    std::function<std::string()> genSnapshotCallback_; // status machine->Raft
+    // 上层直接通过applyQueue来apply快照了
+    // std::function<void(const std::string&)> applySnapshotCallback_; // Raft->status machine
 
     // 需要持久化的四个节点状态
     int id_;                              // 节点编号
@@ -125,16 +144,17 @@ private:
     std::vector<RaftRpc::LogEntry> logs_; // 日志数组 需要持久化
 
     // 下列状态不需要持久化
-    int commitIndex_;             // 节点的已提交索引 注意分辨leadercommit和commitIndex
-    int lastApplied_;             // 最后一个提交给状态机的日志索引
-    std::unordered_map<int,int> nextIndex_;  // nextIndex数组
-    std::unordered_map<int,int> matchIndex_; // matchIndex数组
+    int commitIndex_;                         // 节点的已提交索引 注意分辨leadercommit和commitIndex
+    int lastApplied_;                         // 最后一个提交给状态机的日志索引
+    std::unordered_map<int, int> nextIndex_;  // nextIndex数组
+    std::unordered_map<int, int> matchIndex_; // matchIndex数组
 
     RaftRpc::RaftState status_; // 节点状态
     std::atomic_bool stop_;
     std::unique_ptr<std::thread> leaderHeartBeatTickerThread_;
     std::unique_ptr<std::thread> electionTimeOutTickerThread_;
     std::unique_ptr<std::thread> applierTickerThread_;
+    std::unique_ptr<std::thread> snapshotCheckThread_;
 
     std::shared_ptr<LockQueue<ApplyMsg>> applyQueue_; // Server与Raft的通信接口
 

@@ -1,3 +1,4 @@
 Test/*.out
 Test/*.json
+Test/*.log
 build
