@@ -628,6 +628,13 @@ void Raft::becomeLeader()
     // 重置心跳超时并作为leader立即发送心跳
     resetHeartbeatDeadline();
     DPrintf("[becomeleader] Server %d heartbeat for all follower", id_);
+
+    RaftRpc::LogEntry entry;
+    entry.set_command("no-op");
+    entry.set_logindex(getNewCommandIndex());
+    entry.set_logterm(currentTerm_);
+    logs_.emplace_back(entry);
+
     scheduleAllReplication();
 }
 
