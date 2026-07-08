@@ -11,20 +11,20 @@
 
 using nlohmann::json;
 
-// like static
 namespace
 {
-    // log replication 状态
+    // replication state
     constexpr int Disconnected = 0;
     constexpr int Success = 1;
     constexpr int Retry = 2;
     constexpr int BeFollower = 3;
     constexpr int Stopped = 4;
+    // vote state
     constexpr int LogOutdated = 0;
-    // vote 状态
     constexpr int Voted = 1;
     constexpr int Expired = 2;
     constexpr int Normal = 3;
+    constexpr int NotUpToDate = 4;
 
     constexpr std::size_t ControlBatchSize = 128;
     constexpr std::size_t CommandBatchSize = 32;
@@ -53,15 +53,15 @@ Raft::Raft(std::string ip, std::string port,
         auto channel = grpc::CreateChannel(entry.second, grpc::InsecureChannelCredentials());
         peers_.emplace(entry.first, channel);
         clients_.emplace(entry.first, std::make_unique<RaftClient>(channel));
-
         nextIndex_[entry.first] = 1;
         matchIndex_[entry.first] = 0;
         replicationInFlight_[entry.first] = false;
         replicationPending_[entry.first] = false;
+
+        lastPeerContact_[entry.first] = Clock::time_point::min();
     }
     myAssert(localAddressFound, "[Raft constructor] local address not in address list");
 
-    // 需要从宕机前持久化的快照里读内容
     readPersist(persister_->readRaftState());
     if (lastIncludeSnapshotIndex_ > 0)
     {
@@ -69,19 +69,17 @@ Raft::Raft(std::string ip, std::string port,
         lastApplied_ = lastIncludeSnapshotIndex_;
     }
 
-    // 重置lastReset时间 开始处理超时事件
     const auto now = Clock::now();
     lastResetElectionTime_ = now;
     lastResetHeartBeatTime_ = now;
-    lastHeardHeartBeatTime_ = now;
     resetElectionDeadline();
     resetHeartbeatDeadline();
+    resetQuorumDeadline();
     snapshotDeadline_ = now + std::chrono::milliseconds(SnapshotCheckInterval);
 
     threadPool_ = std::make_unique<ThreadPool>(
         std::max<std::size_t>(2, peers_.size() * 2 + 1));
-    // 启动事件循环
-    // 用future和promise来同步（用condition_variable也行）
+    // 需要同步关系 这里用promise来同步
     auto eventReady = std::make_shared<std::promise<void>>();
     auto eventReadyFuture = eventReady->get_future();
     eventThread_ = std::thread([this, eventReady]
@@ -95,21 +93,17 @@ Raft::Raft(std::string ip, std::string port,
     DPrintf("[Init/ReInit] Server %d, Term %d, LastIncludeSnapshotIndex %d",
             id_, currentTerm_, lastIncludeSnapshotIndex_);
 }
-// 关闭的顺序为：网络层、任务线程池，最后到事件队列
+// 注意析构顺序：先关网络 防止又收到事件 再关线程池 线程池优先级没事件循环高 最后关事件循环
 Raft::~Raft()
 {
     stop_.store(true);
 
-    // Stop new callbacks while the event loop is still able to satisfy callbacks
-    // which are already waiting on a promise.
     if (server_)
     {
         server_->shutdown();
         server_.reset();
     }
 
-    // Network jobs may post their final completion events. Drain them before
-    // asking the single writer to stop.
     if (threadPool_)
         threadPool_->stop();
 
@@ -117,21 +111,18 @@ Raft::~Raft()
         std::lock_guard<std::mutex> lock(queueMutex_);
         eventLoopStopping_ = true;
     }
-    // 在最后清理事件队列和事件线程
     queueCv_.notify_all();
     if (eventThread_.joinable())
         eventThread_.join();
-
-    // 执行到这里已经结束通信了
+    // 执行到这里就没有网络事件了
     persist();
-    DPrintf("[Raft deconstruct] Server %d quit", id_);
+    DPrintf("[~Raft] Server %d quit", id_);
 }
-// 向control队列里添加事件
+
 void Raft::postControl(Event event)
 {
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
-        // 这里要判断队列是否关闭
         if (eventLoopStopping_)
             return;
         controlQueue_.emplace_back(std::move(event));
@@ -149,27 +140,30 @@ void Raft::postCommand(Event event)
     }
     queueCv_.notify_one();
 }
-// 事件循环
+
 void Raft::eventLoop()
 {
     for (;;)
     {
-        // 主要工作就是两项：处理超时事件、处理事件队列事件
-        // 这里要注意临界情况：假如超时和心跳同时到达，应该先处理心跳。因为网络的抖动更大，而定时的抖动更小 这里应该判定为心跳的优先级更高
+        // 这里需要先处理事件 如果对方的心跳响应和超时同时触发，假如先执行心跳，那么会导致
+        // 这个响应无效。但实际上对方早就响应了，因为网络等原因没有及时到达。所以要先处理
+        // 网络事件
         processEventBatch();
         handleDeadlines();
-        // 要先处理再退出！
+
         std::unique_lock<std::mutex> lock(queueMutex_);
         if (eventLoopStopping_ && controlQueue_.empty() && commandQueue_.empty())
             break;
-        // 这里判断顺序也要注意：先control 再 command
         if (!controlQueue_.empty() || !commandQueue_.empty())
             continue;
 
-        // 选最近的deadline来等待
+        // 找最小的ddl 然后阻塞到对应时间点
         auto deadline = snapshotDeadline_;
         if (status_ == RaftRpc::RAFT_LEADER)
+        {
             deadline = std::min(deadline, heartbeatDeadline_);
+            deadline = std::min(deadline, quorumDeadline_);
+        }
         else
             deadline = std::min(deadline, electionDeadline_);
         queueCv_.wait_until(lock, deadline, [this]
@@ -179,7 +173,6 @@ void Raft::eventLoop()
 
 void Raft::processEventBatch()
 {
-    // 先执行control命令
     for (std::size_t count = 0; count < ControlBatchSize; ++count)
     {
         Event event;
@@ -192,15 +185,15 @@ void Raft::processEventBatch()
         }
         event();
     }
-    // 再执行command
+
     for (std::size_t count = 0; count < CommandBatchSize; ++count)
     {
+        // 控制流优先级高于事件流 所以如果执行事件时期超时 那么要重新让给超时
         {
             std::lock_guard<std::mutex> lock(queueMutex_);
             if (!controlQueue_.empty())
                 break;
         }
-        // 超时判断 如果在执行command时来control命令 要把执行权让出
         if (Clock::now() >= (status_ == RaftRpc::RAFT_LEADER
                                  ? heartbeatDeadline_
                                  : electionDeadline_))
@@ -217,22 +210,31 @@ void Raft::processEventBatch()
         event();
     }
 }
-// 处理三个超时任务：选举、心跳、生成快照
+
 void Raft::handleDeadlines()
 {
     auto now = Clock::now();
+    // 超时事件有四个：checkQuorum heartBeat election和 snapshot
     if (status_ == RaftRpc::RAFT_LEADER)
     {
+        // 如果leader在超时周期内没有收到响应 那么要stepdown
+        if (now >= quorumDeadline_)
+        {
+            if (!hasRecentQuorum(now))
+            {
+                stepDown();
+                return;
+            }
+            resetQuorumDeadline();
+        }
         if (now >= heartbeatDeadline_)
         {
-            DPrintf("[handleDeadlines] Server %d send heartbeat", id_);
-            scheduleAllReplication(); // 向所有follower发送心跳
+            scheduleAllReplication();
             resetHeartbeatDeadline();
         }
     }
     else if (now >= electionDeadline_)
     {
-        DPrintf("[handleDeadlines] Server %d start PreVote", id_);
         beginPreVote();
     }
 
@@ -243,7 +245,7 @@ void Raft::handleDeadlines()
                             std::chrono::milliseconds(SnapshotCheckInterval);
     }
 }
-// 绝对定时
+
 void Raft::resetElectionDeadline()
 {
     lastResetElectionTime_ = Clock::now();
@@ -255,6 +257,48 @@ void Raft::resetHeartbeatDeadline()
     lastResetHeartBeatTime_ = Clock::now();
     heartbeatDeadline_ = lastResetHeartBeatTime_ +
                          std::chrono::milliseconds(HeartBeatTimeOut);
+}
+
+void Raft::resetQuorumDeadline()
+{
+    quorumDeadline_ = Clock::now() + std::chrono::milliseconds(ElectionTimeOut);
+}
+
+int Raft::clusterSize() const
+{
+    return static_cast<int>(idToAddr_.size());
+}
+
+int Raft::quorumSize() const
+{
+    return clusterSize() / 2 + 1;
+}
+
+void Raft::markPeerActive(int server, Clock::time_point now)
+{
+    lastPeerContact_[server] = now;
+}
+// for becomeleader
+void Raft::resetLeaderContactTimes(Clock::time_point now)
+{
+    for (const auto &peer : peers_)
+        lastPeerContact_[peer.first] = now;
+    resetQuorumDeadline();
+}
+
+bool Raft::hasRecentQuorum(Clock::time_point now) const
+{
+    int active = 1; // leader itself
+    const auto lease = std::chrono::milliseconds(ElectionTimeOut);
+    for (const auto &peer : peers_)
+    {
+        auto it = lastPeerContact_.find(peer.first);
+        if (it != lastPeerContact_.end() &&
+            it->second != Clock::time_point::min() &&
+            now - it->second <= lease)
+            ++active;
+    }
+    return active >= quorumSize();
 }
 
 void Raft::start(Op command, int *newLogIndex, int *newLogTerm, bool *isLeader)
@@ -274,17 +318,15 @@ void Raft::start(Op command, int *newLogIndex, int *newLogTerm, bool *isLeader)
             persist();
             result = {entry.logindex(), entry.logterm(), true};
             updateCommitIndex();
-            scheduleAllReplication(); // 执行心跳
+            scheduleAllReplication();
         }
         promise->set_value(result); });
     const StartResult result = future.get();
-    // 更新状态
     *newLogIndex = result.index;
     *newLogTerm = result.term;
     *isLeader = result.leader;
-    DPrintf("[start] Server %d add log, command: %s newlogIndex: %d", id_, command.operation.c_str(), *newLogIndex);
 }
-// control
+
 void Raft::OnRequestVote(const RaftRpc::RequestVoteArgs *request,
                          RaftRpc::RequestVoteReply *reply)
 {
@@ -299,14 +341,11 @@ void Raft::OnRequestVote(const RaftRpc::RequestVoteArgs *request,
     *reply = future.get();
 }
 
-
 void Raft::handleRequestVote(const RaftRpc::RequestVoteArgs &request,
                              RaftRpc::RequestVoteReply *reply)
 {
-    // 成为follower 但是还是要投票
     if (request.term() > currentTerm_)
         becomeFollower(request.term());
-    // term过时了 不需要投票直接拒绝
     if (request.term() < currentTerm_)
     {
         reply->set_term(currentTerm_);
@@ -314,71 +353,66 @@ void Raft::handleRequestVote(const RaftRpc::RequestVoteArgs &request,
         reply->set_votestate(Expired);
         return;
     }
-    myAssert(request.term() == currentTerm_, "assert {request.term() == currentTerm_} fail in handleRequestVote");
-
-    // 如果已经投给目标对象了，那么还是要投
+    /*
+        votedFor is null or candidateId, and candidate’s log is at
+        least as up-to-date as receiver’s log, grant vote
+    */
     const bool mayVote = votedFor_ == -1 || votedFor_ == request.candidateid();
-    const bool upToDate = whetherVoteFor(request.lastlogindex(), request.lastlogterm()); // 根据目标对象的index和term来判断是否投票
+    const bool upToDate = whetherVoteFor(request.lastlogindex(), request.lastlogterm());
     const bool granted = mayVote && upToDate;
     if (granted)
     {
-        // 需要更新vote对象
         if (votedFor_ != request.candidateid())
         {
             votedFor_ = request.candidateid();
             persist();
         }
         resetElectionDeadline();
-        DPrintf("[handleRequestVote] Server %d received requestVote, vote for %d", id_, votedFor_);
+        DPrintf("[handleRequestVote] Server %d vote for %d", id_, request.candidateid());
     }
     reply->set_term(currentTerm_);
     reply->set_votegranted(granted);
     reply->set_votestate(granted ? Normal : (mayVote ? LogOutdated : Voted));
 }
 
-void Raft::OnPreVote(const RaftRpc::PreVoteArgs* request, RaftRpc::PreVoteReply* reply)
+void Raft::OnPreVote(const RaftRpc::PreVoteArgs *request,
+                     RaftRpc::PreVoteReply *reply)
 {
     auto promise = std::make_shared<std::promise<RaftRpc::PreVoteReply>>();
     auto future = promise->get_future();
     RaftRpc::PreVoteArgs copy = *request;
-    postControl([this, copy = std::move(copy), promise]{
+    postControl([this, copy = std::move(copy), promise]
+                {
         RaftRpc::PreVoteReply result;
         handlePreVote(copy, &result);
-        promise->set_value(std::move(result));
-    });
+        promise->set_value(std::move(result)); });
     *reply = future.get();
 }
-
-// 逻辑和投票逻辑是一样的
-void Raft::handlePreVote(const RaftRpc::PreVoteArgs& request, RaftRpc::PreVoteReply* reply)
+// NOTE:PreVote不需要改变节点的状态
+void Raft::handlePreVote(const RaftRpc::PreVoteArgs &request,
+                         RaftRpc::PreVoteReply *reply)
 {
-    if(request.term() > currentTerm_)
-        becomeFollower(request.term());
-    if(request.term() < currentTerm_)
+    reply->set_term(currentTerm_);
+    if (request.term() < currentTerm_)
     {
-        reply->set_term(currentTerm_);
         reply->set_granted(false);
         reply->set_votestate(Expired);
         return;
     }
-    myAssert(request.term() == currentTerm_, "assert {request.term() == currentTerm_} fail in handlePreVote");
-
-    auto now = std::chrono::steady_clock::now();
-    // PreVote不需要看votedFor
-    bool mayVote = now - lastHeardHeartBeatTime_ > std::chrono::milliseconds(HeartBeatTimeOut);
-    bool upToDate = whetherVoteFor(request.lastlogindex(), request.lastlogterm());
-    reply->set_term(currentTerm_);
-    reply->set_granted(upToDate && mayVote);
-    reply->set_votestate(upToDate ? Normal: LogOutdated);
+    // 节点同意preVote请求为：whetherVoteFor && 在超时时间内没有leader心跳
+    const bool leaseExpired = Clock::now() >= electionDeadline_;
+    const bool upToDate =
+        whetherVoteFor(request.lastlogindex(), request.lastlogterm());
+    const bool granted = leaseExpired && upToDate;
+    reply->set_granted(granted);
+    reply->set_votestate(granted ? Normal
+                                 : (upToDate ? Voted : NotUpToDate));
 }
 
-
-void Raft::OnAppendEntriesStreamOn(
-    std::unique_ptr<AppendEntriesResponder> responder, const std::string &peer)
+void Raft::OnAppendEntriesStreamOn(std::unique_ptr<AppendEntriesResponder> responder, const std::string &peer)
 {
     const int server = std::stoi(peer);
     AppendEntriesResponder *raw = responder.release();
-    // 需要保存流对象
     postControl([this, server, raw]
                 { streamServer_[server].AEResponder.reset(raw); });
 }
@@ -407,14 +441,13 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
     }
     else
     {
-        myAssert(request.term() == currentTerm_, "assert {request.term() == currentTerm_} fail in handleAppendEntries");
-
         if (status_ != RaftRpc::RAFT_FOLLOWER)
             status_ = RaftRpc::RAFT_FOLLOWER;
         resetElectionDeadline();
-        lastHeardHeartBeatTime_ = std::chrono::steady_clock::now();
-
-        bool matches = matchLog(request.prelogindex(), request.prelogterm());
+        
+        bool matches = request.prelogindex() >= lastIncludeSnapshotIndex_ &&
+                       request.prelogindex() <= getLastLogIndex() &&
+                       matchLog(request.prelogindex(), request.prelogterm());
         if (!matches)
         {
             int conflictIndex = std::min(request.prelogindex(), getLastLogIndex());
@@ -422,7 +455,7 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
                 conflictIndex = lastIncludeSnapshotIndex_ + 1;
             else
             {
-                // 一直递减到前一个term区域 最多减到lastIncludeSnapshotIndex+1 即index为0的日志
+                // fast back
                 const int conflictTerm = getLogTermFromIndex(conflictIndex);
                 while (conflictIndex > lastIncludeSnapshotIndex_ + 1 &&
                        getLogTermFromIndex(conflictIndex - 1) == conflictTerm)
@@ -436,14 +469,11 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
         else
         {
             bool changed = false;
-            // 一次截断冲突的部分 然后append
             for (int i = 0; i < request.entries_size(); ++i)
             {
                 const auto &incoming = request.entries(i);
                 if (incoming.logindex() <= getLastLogIndex())
                 {
-                    // 扩容后默认元素的logindex为0（getlastLogIndex为0） 然后传入的logindex不为0 导致错误
-                    // logs_[getSlicesIndexFromLogIndex(request->entries(i).logindex())] = request->entries(i);
                     const int pos = getSlicesIndexFromLogIndex(incoming.logindex());
                     if (logs_[pos].logterm() != incoming.logterm())
                     {
@@ -465,7 +495,6 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
                 commitIndex_ = std::min(getLastLogIndex(), request.leadercommit());
                 applyCommitted();
             }
-            DPrintf("[handleAppendEntries] Server %d got logs, log size: %d, commitindex: %d", id_, request.entries_size(), commitIndex_);
             reply.set_term(currentTerm_);
             reply.set_succss(true);
             reply.set_updatenextindex(-100);
@@ -521,16 +550,12 @@ void Raft::handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request,
     }
     else
     {
-        myAssert(request.term() == currentTerm_, "assert {request.term() == currentTerm_} fail in handleInstallSnapshot");
-
         status_ = RaftRpc::RAFT_FOLLOWER;
         resetElectionDeadline();
-        lastHeardHeartBeatTime_ = std::chrono::steady_clock::now();
         if (request.lastsnapshotincludeindex() > lastIncludeSnapshotIndex_)
         {
             const int snapshotIndex = request.lastsnapshotincludeindex();
-            // 是否需要保留日志的后缀部分
-            // 因为leader发现follower需要快照时可能已经发过日志了
+            // 在节点接收到快照时， 可能已经从leader处拿到日志了 所以那部分日志需要保留
             const bool keepSuffix =
                 snapshotIndex <= getLastLogIndex() &&
                 snapshotIndex >= lastIncludeSnapshotIndex_ &&
@@ -551,7 +576,6 @@ void Raft::handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request,
             lastApplied_ = std::max(lastApplied_, lastIncludeSnapshotIndex_);
             persister_->save(persistData(), request.data());
 
-            // 直接把snapshot传给上层。snapshot是经过leader确认的 可以直接apply
             ApplyMsg msg;
             msg.SnapshotValid_ = true;
             msg.Snapshot_ = json::parse(request.data());
@@ -560,7 +584,6 @@ void Raft::handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request,
             applyQueue_->push(msg);
         }
         reply.set_term(currentTerm_);
-        DPrintf("[handleInstallSnapshot] Server %d got Snapshot from %d", id_, request.leaderid());
     }
     auto session = streamServer_.find(server);
     if (session != streamServer_.end() && session->second.ISResponder)
@@ -579,61 +602,68 @@ void Raft::OnInstallSnapshotStreamClose(const std::string &peer)
             it->second.ISResponder.reset();
         } });
 }
-//TODO: add beginPreVote
+
 void Raft::beginPreVote()
 {
-    // status maybe follower, precandidate, but never leader
-    if(stop_.load() || status_ == RaftRpc::RAFT_LEADER)
+    if (stop_.load() || status_ == RaftRpc::RAFT_LEADER)
         return;
+
     status_ = RaftRpc::RAFT_PRECANDIDATE;
-    votesGranted_ = 1; // 因为PreVote和Vote不会并行 所以这里用是没问题的
+    preVoteTerm_ = currentTerm_ + 1;
+    preVotesGranted_ = 1;
+    const int round = ++preVoteRound_;
     resetElectionDeadline();
-    // prevote 并不会加term 也不会保存voteFor
-    int lastIndex, lastTerm;
+
+    int lastIndex;
+    int lastTerm;
     getLastLogIndexAndTerm(&lastIndex, &lastTerm);
-    for(const auto& peer: peers_)
+    for (const auto &peer : peers_)
     {
         RaftRpc::PreVoteArgs request;
-        request.set_term(currentTerm_);
+        request.set_term(preVoteTerm_);
         request.set_candidateid(id_);
         request.set_lastlogindex(lastIndex);
         request.set_lastlogterm(lastTerm);
         const int server = peer.first;
-        threadPool_->submit([this, request, server]()mutable{
+        threadPool_->submit([this, server, request, round]() mutable
+                            {
             RaftRpc::PreVoteReply reply;
             grpc::ClientContext context;
             context.AddMetadata("node-id", std::to_string(id_));
-            context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(PreVoteTimeOut));
+            context.set_deadline(std::chrono::system_clock::now() +
+                                 std::chrono::milliseconds(PreVoteTimeOut));
             const bool ok =
                 clients_.at(server)->PreVote(&context, request, &reply);
-            postControl([this, server, term = request.term(), ok, reply](){
-                handlePreReply(server, term, ok, reply);
-            });
-        });
+            postControl([this, server, term = request.term(), round, ok, reply] {
+                handlePreVoteReply(server, term, round, ok, reply);
+            }); });
     }
-    // if only one node in group, this statement will win the vote
-    if(votesGranted_ >= static_cast<int>(peers_.size()/2 + 1))
-    {
-        DPrintf("[beginPreVote] PreVote success, start election");
+    // 为了保证1节点集群也能胜出
+    if (preVotesGranted_ >= quorumSize())
         beginElection();
-    }
 }
 
-void Raft::handlePreReply(int server, int requestTerm, bool transportOk, RaftRpc::PreVoteReply reply)
+void Raft::handlePreVoteReply(int server, int requestTerm, int requestRound,
+                              bool transportOk, RaftRpc::PreVoteReply reply)
 {
-    if(!transportOk) return;
-    if(requestTerm > currentTerm_)
+    if (!transportOk)
+    {
+        // 注意 这里要重置grpc的连接失败的指数退避功能。如果一个节点在分区后恢复，但因为grpc
+        // 的指数退避导致节点不能收到心跳，会扰乱集群
+        grpc::experimental::ChannelResetConnectionBackoff(
+            peers_.at(server).get());
+        return;
+    }
+    if (reply.term() > currentTerm_)
     {
         becomeFollower(reply.term());
         return;
     }
-    if(status_ != RaftRpc::RAFT_PRECANDIDATE || requestTerm != currentTerm_)
+    if (status_ != RaftRpc::RAFT_PRECANDIDATE ||
+        requestTerm != preVoteTerm_ || requestRound != preVoteRound_)
         return;
-    if(reply.granted() && ++votesGranted_ >= static_cast<int>(peers_.size()/2 + 1))
-    {
-        DPrintf("[beginPreVote] PreVote success, start election");
+    if (reply.granted() && ++preVotesGranted_ >= quorumSize())
         beginElection();
-    }
 }
 
 void Raft::beginElection()
@@ -643,8 +673,8 @@ void Raft::beginElection()
     status_ = RaftRpc::RAFT_CANDIDATE;
     ++currentTerm_;
     votedFor_ = id_;
-    votesGranted_ = 1;            // counter for vote
-    electionTerm_ = currentTerm_; // save term before election
+    votesGranted_ = 1;
+    electionTerm_ = currentTerm_;
     persist();
     resetElectionDeadline();
 
@@ -672,30 +702,36 @@ void Raft::beginElection()
                 handleVoteReply(server, term, ok, reply);
             }); });
     }
-    // 如果集群大小为1那么也要成为leader
-    if (votesGranted_ >= static_cast<int>(idToAddr_.size() / 2 + 1))
+    if (votesGranted_ >= quorumSize())
         becomeLeader();
 }
 
-void Raft::handleVoteReply(int, int requestTerm, bool transportOk,
+void Raft::handleVoteReply(int server, int requestTerm, bool transportOk,
                            RaftRpc::RequestVoteReply reply)
 {
     if (!transportOk)
+    {
+        grpc::experimental::ChannelResetConnectionBackoff(
+            peers_.at(server).get());
         return;
+    }
     if (reply.term() > currentTerm_)
     {
         becomeFollower(reply.term());
         return;
     }
-    // 执行becomeleader后 后续handleVoteReply就不会重复执行了
     if (status_ != RaftRpc::RAFT_CANDIDATE ||
         requestTerm != currentTerm_ || electionTerm_ != currentTerm_)
         return;
     if (reply.votegranted() &&
-        ++votesGranted_ >= static_cast<int>(idToAddr_.size() / 2 + 1))
+        ++votesGranted_ >= quorumSize())
         becomeLeader();
 }
-// 更新状态、持久化，并重置electionTimeout
+/*
+    If election timeout elapses without receiving AppendEntries
+    RPC from current leader or granting vote to candidate:
+    convert to candidate
+*/
 void Raft::becomeFollower(int term)
 {
     if (term > currentTerm_)
@@ -706,33 +742,39 @@ void Raft::becomeFollower(int term)
     }
     status_ = RaftRpc::RAFT_FOLLOWER;
     votesGranted_ = 0;
+    preVotesGranted_ = 0;
     resetElectionDeadline();
-    DPrintf("[becomeFollower] Server %d be follower", id_);
+}
+
+void Raft::stepDown()
+{
+    // stepDown不需要persist
+    status_ = RaftRpc::RAFT_FOLLOWER;
+    votesGranted_ = 0;
+    preVotesGranted_ = 0;
+    // stepDown后就不能持有对应的worker了
+    for (auto &entry : replicationPending_)
+        entry.second = false;
+    for (auto &entry : replicationInFlight_)
+        entry.second = false;
+    resetElectionDeadline();
 }
 
 void Raft::becomeLeader()
 {
     status_ = RaftRpc::RAFT_LEADER;
+    votesGranted_ = 0;
+    preVotesGranted_ = 0;
     const int next = getLastLogIndex() + 1;
     for (const auto &peer : peers_)
     {
         nextIndex_[peer.first] = next;
         matchIndex_[peer.first] = 0;
+        replicationInFlight_[peer.first] = false;
         replicationPending_[peer.first] = false;
     }
-    DPrintf("[becomeleader] Server %d be leader", id_);
-    // 重置心跳超时并作为leader立即发送心跳
+    resetLeaderContactTimes(Clock::now());
     resetHeartbeatDeadline();
-    DPrintf("[becomeleader] Server %d heartbeat for all follower", id_);
-
-    RaftRpc::LogEntry entry;
-    entry.set_command("no-op");
-    entry.set_logindex(getNewCommandIndex());
-    entry.set_logterm(currentTerm_);
-    logs_.emplace_back(entry);
-
-    persist();
-
     scheduleAllReplication();
 }
 
@@ -754,7 +796,7 @@ void Raft::scheduleReplication(int server)
         return;
     }
     replicationInFlight_[server] = true;
-    replicationPending_[server] = false; // 消费pending
+    replicationPending_[server] = false;
 
     if (nextIndex_[server] <= lastIncludeSnapshotIndex_)
     {
@@ -781,30 +823,26 @@ void Raft::launchAppendEntries(int server, RaftRpc::AppendEntriesArgs request)
         context.set_deadline(std::chrono::system_clock::now() +
                              std::chrono::milliseconds(AppendEntriesTimeOut));
         auto stream = clients_.at(server)->CreateAppendEntriesStream(&context);
-
         const bool ok = stream->Write(&request) && stream->Read(&reply);
         stream->Close();
-
-        // control
         postControl([this, server, term = request.term(), request, ok, reply] {
             handleAppendReply(server, term, request, ok, reply);
         }); });
 }
-// 处理append结果
+
 void Raft::handleAppendReply(int server, int requestTerm,
                              RaftRpc::AppendEntriesArgs request,
                              bool transportOk, RaftRpc::AppendEntriesReply reply)
 {
-    replicationInFlight_[server] = false;
     if (status_ != RaftRpc::RAFT_LEADER || requestTerm != currentTerm_)
         return;
+    replicationInFlight_[server] = false;
     if (!transportOk)
     {
-        // NOTE:如果一个节点从分区中恢复，那么可能因为grpc的指数退避而超时触发选举
-        // 所以必须要关闭grpc对特定链接的指数退避
-        grpc::experimental::ChannelResetConnectionBackoff(peers_.at(server).get());
+        grpc::experimental::ChannelResetConnectionBackoff(
+            peers_.at(server).get());
+        return;
     }
-    // 凡是收到消息 就要判断term
     if (reply.term() > currentTerm_)
     {
         becomeFollower(reply.term());
@@ -812,12 +850,15 @@ void Raft::handleAppendReply(int server, int requestTerm,
     }
     if (reply.term() < currentTerm_)
         return;
+    // 只要收到了消息 就要记录peer的active时间点
+    markPeerActive(server, Clock::now());
 
     bool retry = false;
     if (reply.succss())
     {
-        // 幂等
-        matchIndex_[server] = std::max(matchIndex_[server],request.prelogindex() + request.entries_size());
+        matchIndex_[server] =
+            std::max(matchIndex_[server],
+                     request.prelogindex() + request.entries_size());
         nextIndex_[server] = matchIndex_[server] + 1;
         updateCommitIndex();
     }
@@ -826,15 +867,15 @@ void Raft::handleAppendReply(int server, int requestTerm,
         int suggested = reply.updatenextindex();
         if (suggested == -100)
             suggested = nextIndex_[server] - 1;
-
         suggested = std::max(1, std::min(suggested, getLastLogIndex() + 1));
         if (suggested >= nextIndex_[server])
             suggested = std::max(1, nextIndex_[server] - 1);
         nextIndex_[server] = suggested;
         retry = true;
     }
-    // 如果日志没有全部复制过去 那么还是要启动复制的
-    if (retry || replicationPending_[server] || nextIndex_[server] <= getLastLogIndex())
+
+    if (retry || replicationPending_[server] ||
+        nextIndex_[server] <= getLastLogIndex())
         scheduleReplication(server);
 }
 
@@ -858,12 +899,13 @@ void Raft::launchSnapshot(int server, RaftRpc::InstallSnapshotArgs request)
 void Raft::handleSnapshotReply(int server, int requestTerm, bool transportOk,
                                RaftRpc::InstallSnapshotReply reply)
 {
-    replicationInFlight_[server] = false;
     if (status_ != RaftRpc::RAFT_LEADER || requestTerm != currentTerm_)
         return;
+    replicationInFlight_[server] = false;
     if (!transportOk)
     {
-        grpc::experimental::ChannelResetConnectionBackoff(peers_.at(server).get());
+        grpc::experimental::ChannelResetConnectionBackoff(
+            peers_.at(server).get());
         return;
     }
     if (reply.term() > currentTerm_)
@@ -871,6 +913,9 @@ void Raft::handleSnapshotReply(int server, int requestTerm, bool transportOk,
         becomeFollower(reply.term());
         return;
     }
+    if (reply.term() < currentTerm_)
+        return;
+    markPeerActive(server, Clock::now());
     matchIndex_[server] = std::max(matchIndex_[server], lastIncludeSnapshotIndex_);
     nextIndex_[server] = matchIndex_[server] + 1;
     if (replicationPending_[server] || nextIndex_[server] <= getLastLogIndex())
@@ -888,13 +933,16 @@ RaftRpc::AppendEntriesArgs Raft::buildAppendEntries(int server)
     request.set_prelogindex(previousIndex);
     request.set_prelogterm(previousTerm);
     request.set_leadercommit(commitIndex_);
-    // 注意边界条件
     const int first = previousIndex - lastIncludeSnapshotIndex_;
     for (int i = std::max(0, first); i < static_cast<int>(logs_.size()); ++i)
         *request.add_entries() = logs_[i];
     return request;
 }
-
+/*
+    If there exists an N such that N > commitIndex, a majority
+    of matchIndex[i] ≥ N, and log[N].term == currentTerm:
+    set commitIndex = N
+*/
 void Raft::updateCommitIndex()
 {
     const int oldCommit = commitIndex_;
@@ -904,9 +952,8 @@ void Raft::updateCommitIndex()
         for (const auto &peer : peers_)
             if (matchIndex_[peer.first] >= index)
                 ++replicated;
-        // 根据Raft安全性要求， 提交日志的话日志里必须有一条当前term的日志
-        // 比较最新的一条日志即可
-        if (replicated >= static_cast<int>(idToAddr_.size() / 2 + 1) && getLogTermFromIndex(index) == currentTerm_)
+        if (replicated >= quorumSize() &&
+            getLogTermFromIndex(index) == currentTerm_)
         {
             commitIndex_ = index;
             break;
@@ -937,13 +984,9 @@ void Raft::maybeTakeSnapshot()
         !genSnapshotCallback_)
         return;
 
-    DPrintf("[takeSnapshot] Server %d generating snapshot", id_);
     const int snapshotIndex = commitIndex_;
     const int snapshotTerm = getLogTermFromIndex(snapshotIndex);
-
-    // 上层给的snapshotgenerater
     std::string data = genSnapshotCallback_();
-
     const int eraseCount = snapshotIndex - lastIncludeSnapshotIndex_;
     logs_.erase(logs_.begin(), logs_.begin() + eraseCount);
     lastIncludeSnapshotIndex_ = snapshotIndex;
@@ -1166,7 +1209,7 @@ int Raft::getLastIncludeSnapshotTerm()
     return query<int>([this]
                       { return lastIncludeSnapshotTerm_; });
 }
-// for upon
+
 void Raft::setSnapshotCallback(const std::function<std::string()> &generator)
 {
     auto promise = std::make_shared<std::promise<void>>();
