@@ -23,6 +23,7 @@ namespace RaftRpc {
 
 static const char* RaftRpc_method_names[] = {
   "/RaftRpc.RaftRpc/RequestVote",
+  "/RaftRpc.RaftRpc/PreVote",
   "/RaftRpc.RaftRpc/AppendEntries",
   "/RaftRpc.RaftRpc/InstallSnapshot",
 };
@@ -35,8 +36,9 @@ std::unique_ptr< RaftRpc::Stub> RaftRpc::NewStub(const std::shared_ptr< ::grpc::
 
 RaftRpc::Stub::Stub(const std::shared_ptr< ::grpc::ChannelInterface>& channel, const ::grpc::StubOptions& options)
   : channel_(channel), rpcmethod_RequestVote_(RaftRpc_method_names[0], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
-  , rpcmethod_AppendEntries_(RaftRpc_method_names[1], options.suffix_for_stats(),::grpc::internal::RpcMethod::BIDI_STREAMING, channel)
-  , rpcmethod_InstallSnapshot_(RaftRpc_method_names[2], options.suffix_for_stats(),::grpc::internal::RpcMethod::BIDI_STREAMING, channel)
+  , rpcmethod_PreVote_(RaftRpc_method_names[1], options.suffix_for_stats(),::grpc::internal::RpcMethod::NORMAL_RPC, channel)
+  , rpcmethod_AppendEntries_(RaftRpc_method_names[2], options.suffix_for_stats(),::grpc::internal::RpcMethod::BIDI_STREAMING, channel)
+  , rpcmethod_InstallSnapshot_(RaftRpc_method_names[3], options.suffix_for_stats(),::grpc::internal::RpcMethod::BIDI_STREAMING, channel)
   {}
 
 ::grpc::Status RaftRpc::Stub::RequestVote(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs& request, ::RaftRpc::RequestVoteReply* response) {
@@ -58,6 +60,29 @@ void RaftRpc::Stub::async::RequestVote(::grpc::ClientContext* context, const ::R
 ::grpc::ClientAsyncResponseReader< ::RaftRpc::RequestVoteReply>* RaftRpc::Stub::AsyncRequestVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs& request, ::grpc::CompletionQueue* cq) {
   auto* result =
     this->PrepareAsyncRequestVoteRaw(context, request, cq);
+  result->StartCall();
+  return result;
+}
+
+::grpc::Status RaftRpc::Stub::PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::RaftRpc::PreVoteReply* response) {
+  return ::grpc::internal::BlockingUnaryCall< ::RaftRpc::PreVoteArgs, ::RaftRpc::PreVoteReply, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(channel_.get(), rpcmethod_PreVote_, context, request, response);
+}
+
+void RaftRpc::Stub::async::PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response, std::function<void(::grpc::Status)> f) {
+  ::grpc::internal::CallbackUnaryCall< ::RaftRpc::PreVoteArgs, ::RaftRpc::PreVoteReply, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(stub_->channel_.get(), stub_->rpcmethod_PreVote_, context, request, response, std::move(f));
+}
+
+void RaftRpc::Stub::async::PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response, ::grpc::ClientUnaryReactor* reactor) {
+  ::grpc::internal::ClientCallbackUnaryFactory::Create< ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(stub_->channel_.get(), stub_->rpcmethod_PreVote_, context, request, response, reactor);
+}
+
+::grpc::ClientAsyncResponseReader< ::RaftRpc::PreVoteReply>* RaftRpc::Stub::PrepareAsyncPreVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) {
+  return ::grpc::internal::ClientAsyncResponseReaderHelper::Create< ::RaftRpc::PreVoteReply, ::RaftRpc::PreVoteArgs, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(channel_.get(), cq, rpcmethod_PreVote_, context, request);
+}
+
+::grpc::ClientAsyncResponseReader< ::RaftRpc::PreVoteReply>* RaftRpc::Stub::AsyncPreVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) {
+  auto* result =
+    this->PrepareAsyncPreVoteRaw(context, request, cq);
   result->StartCall();
   return result;
 }
@@ -107,6 +132,16 @@ RaftRpc::Service::Service() {
              }, this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
       RaftRpc_method_names[1],
+      ::grpc::internal::RpcMethod::NORMAL_RPC,
+      new ::grpc::internal::RpcMethodHandler< RaftRpc::Service, ::RaftRpc::PreVoteArgs, ::RaftRpc::PreVoteReply, ::grpc::protobuf::MessageLite, ::grpc::protobuf::MessageLite>(
+          [](RaftRpc::Service* service,
+             ::grpc::ServerContext* ctx,
+             const ::RaftRpc::PreVoteArgs* req,
+             ::RaftRpc::PreVoteReply* resp) {
+               return service->PreVote(ctx, req, resp);
+             }, this)));
+  AddMethod(new ::grpc::internal::RpcServiceMethod(
+      RaftRpc_method_names[2],
       ::grpc::internal::RpcMethod::BIDI_STREAMING,
       new ::grpc::internal::BidiStreamingHandler< RaftRpc::Service, ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>(
           [](RaftRpc::Service* service,
@@ -116,7 +151,7 @@ RaftRpc::Service::Service() {
                return service->AppendEntries(ctx, stream);
              }, this)));
   AddMethod(new ::grpc::internal::RpcServiceMethod(
-      RaftRpc_method_names[2],
+      RaftRpc_method_names[3],
       ::grpc::internal::RpcMethod::BIDI_STREAMING,
       new ::grpc::internal::BidiStreamingHandler< RaftRpc::Service, ::RaftRpc::InstallSnapshotArgs, ::RaftRpc::InstallSnapshotReply>(
           [](RaftRpc::Service* service,
@@ -131,6 +166,13 @@ RaftRpc::Service::~Service() {
 }
 
 ::grpc::Status RaftRpc::Service::RequestVote(::grpc::ServerContext* context, const ::RaftRpc::RequestVoteArgs* request, ::RaftRpc::RequestVoteReply* response) {
+  (void) context;
+  (void) request;
+  (void) response;
+  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+}
+
+::grpc::Status RaftRpc::Service::PreVote(::grpc::ServerContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response) {
   (void) context;
   (void) request;
   (void) response;

@@ -61,6 +61,12 @@ extern InstallSnapshotReplyDefaultTypeInternal _InstallSnapshotReply_default_ins
 class LogEntry;
 struct LogEntryDefaultTypeInternal;
 extern LogEntryDefaultTypeInternal _LogEntry_default_instance_;
+class PreVoteArgs;
+struct PreVoteArgsDefaultTypeInternal;
+extern PreVoteArgsDefaultTypeInternal _PreVoteArgs_default_instance_;
+class PreVoteReply;
+struct PreVoteReplyDefaultTypeInternal;
+extern PreVoteReplyDefaultTypeInternal _PreVoteReply_default_instance_;
 class RequestVoteArgs;
 struct RequestVoteArgsDefaultTypeInternal;
 extern RequestVoteArgsDefaultTypeInternal _RequestVoteArgs_default_instance_;
@@ -74,6 +80,8 @@ template<> ::RaftRpc::AppendEntriesReply* Arena::CreateMaybeMessage<::RaftRpc::A
 template<> ::RaftRpc::InstallSnapshotArgs* Arena::CreateMaybeMessage<::RaftRpc::InstallSnapshotArgs>(Arena*);
 template<> ::RaftRpc::InstallSnapshotReply* Arena::CreateMaybeMessage<::RaftRpc::InstallSnapshotReply>(Arena*);
 template<> ::RaftRpc::LogEntry* Arena::CreateMaybeMessage<::RaftRpc::LogEntry>(Arena*);
+template<> ::RaftRpc::PreVoteArgs* Arena::CreateMaybeMessage<::RaftRpc::PreVoteArgs>(Arena*);
+template<> ::RaftRpc::PreVoteReply* Arena::CreateMaybeMessage<::RaftRpc::PreVoteReply>(Arena*);
 template<> ::RaftRpc::RequestVoteArgs* Arena::CreateMaybeMessage<::RaftRpc::RequestVoteArgs>(Arena*);
 template<> ::RaftRpc::RequestVoteReply* Arena::CreateMaybeMessage<::RaftRpc::RequestVoteReply>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
@@ -83,12 +91,13 @@ enum RaftState : int {
   RAFT_FOLLOWER = 0,
   RAFT_CANDIDATE = 1,
   RAFT_LEADER = 2,
+  RAFT_PRECANDIDATE = 3,
   RaftState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   RaftState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool RaftState_IsValid(int value);
 constexpr RaftState RaftState_MIN = RAFT_FOLLOWER;
-constexpr RaftState RaftState_MAX = RAFT_LEADER;
+constexpr RaftState RaftState_MAX = RAFT_PRECANDIDATE;
 constexpr int RaftState_ARRAYSIZE = RaftState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* RaftState_descriptor();
@@ -1026,6 +1035,357 @@ class RequestVoteReply final :
 };
 // -------------------------------------------------------------------
 
+class PreVoteArgs final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:RaftRpc.PreVoteArgs) */ {
+ public:
+  inline PreVoteArgs() : PreVoteArgs(nullptr) {}
+  ~PreVoteArgs() override;
+  explicit PROTOBUF_CONSTEXPR PreVoteArgs(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PreVoteArgs(const PreVoteArgs& from);
+  PreVoteArgs(PreVoteArgs&& from) noexcept
+    : PreVoteArgs() {
+    *this = ::std::move(from);
+  }
+
+  inline PreVoteArgs& operator=(const PreVoteArgs& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PreVoteArgs& operator=(PreVoteArgs&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const PreVoteArgs& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PreVoteArgs* internal_default_instance() {
+    return reinterpret_cast<const PreVoteArgs*>(
+               &_PreVoteArgs_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    5;
+
+  friend void swap(PreVoteArgs& a, PreVoteArgs& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PreVoteArgs* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PreVoteArgs* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PreVoteArgs* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PreVoteArgs>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const PreVoteArgs& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const PreVoteArgs& from) {
+    PreVoteArgs::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(PreVoteArgs* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "RaftRpc.PreVoteArgs";
+  }
+  protected:
+  explicit PreVoteArgs(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTermFieldNumber = 1,
+    kCandidateIdFieldNumber = 2,
+    kLastLogTermFieldNumber = 3,
+    kLastLogIndexFieldNumber = 4,
+  };
+  // int32 Term = 1;
+  void clear_term();
+  int32_t term() const;
+  void set_term(int32_t value);
+  private:
+  int32_t _internal_term() const;
+  void _internal_set_term(int32_t value);
+  public:
+
+  // int32 CandidateId = 2;
+  void clear_candidateid();
+  int32_t candidateid() const;
+  void set_candidateid(int32_t value);
+  private:
+  int32_t _internal_candidateid() const;
+  void _internal_set_candidateid(int32_t value);
+  public:
+
+  // int32 LastLogTerm = 3;
+  void clear_lastlogterm();
+  int32_t lastlogterm() const;
+  void set_lastlogterm(int32_t value);
+  private:
+  int32_t _internal_lastlogterm() const;
+  void _internal_set_lastlogterm(int32_t value);
+  public:
+
+  // int32 LastLogIndex = 4;
+  void clear_lastlogindex();
+  int32_t lastlogindex() const;
+  void set_lastlogindex(int32_t value);
+  private:
+  int32_t _internal_lastlogindex() const;
+  void _internal_set_lastlogindex(int32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:RaftRpc.PreVoteArgs)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    int32_t term_;
+    int32_t candidateid_;
+    int32_t lastlogterm_;
+    int32_t lastlogindex_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_RaftRpc_2eproto;
+};
+// -------------------------------------------------------------------
+
+class PreVoteReply final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:RaftRpc.PreVoteReply) */ {
+ public:
+  inline PreVoteReply() : PreVoteReply(nullptr) {}
+  ~PreVoteReply() override;
+  explicit PROTOBUF_CONSTEXPR PreVoteReply(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PreVoteReply(const PreVoteReply& from);
+  PreVoteReply(PreVoteReply&& from) noexcept
+    : PreVoteReply() {
+    *this = ::std::move(from);
+  }
+
+  inline PreVoteReply& operator=(const PreVoteReply& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PreVoteReply& operator=(PreVoteReply&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const PreVoteReply& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PreVoteReply* internal_default_instance() {
+    return reinterpret_cast<const PreVoteReply*>(
+               &_PreVoteReply_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    6;
+
+  friend void swap(PreVoteReply& a, PreVoteReply& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PreVoteReply* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PreVoteReply* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PreVoteReply* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PreVoteReply>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const PreVoteReply& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const PreVoteReply& from) {
+    PreVoteReply::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(PreVoteReply* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "RaftRpc.PreVoteReply";
+  }
+  protected:
+  explicit PreVoteReply(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTermFieldNumber = 1,
+    kGrantedFieldNumber = 2,
+    kVoteStateFieldNumber = 3,
+  };
+  // int32 Term = 1;
+  void clear_term();
+  int32_t term() const;
+  void set_term(int32_t value);
+  private:
+  int32_t _internal_term() const;
+  void _internal_set_term(int32_t value);
+  public:
+
+  // bool Granted = 2;
+  void clear_granted();
+  bool granted() const;
+  void set_granted(bool value);
+  private:
+  bool _internal_granted() const;
+  void _internal_set_granted(bool value);
+  public:
+
+  // int32 VoteState = 3;
+  void clear_votestate();
+  int32_t votestate() const;
+  void set_votestate(int32_t value);
+  private:
+  int32_t _internal_votestate() const;
+  void _internal_set_votestate(int32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:RaftRpc.PreVoteReply)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    int32_t term_;
+    bool granted_;
+    int32_t votestate_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_RaftRpc_2eproto;
+};
+// -------------------------------------------------------------------
+
 class InstallSnapshotArgs final :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:RaftRpc.InstallSnapshotArgs) */ {
  public:
@@ -1074,7 +1434,7 @@ class InstallSnapshotArgs final :
                &_InstallSnapshotArgs_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    5;
+    7;
 
   friend void swap(InstallSnapshotArgs& a, InstallSnapshotArgs& b) {
     a.Swap(&b);
@@ -1282,7 +1642,7 @@ class InstallSnapshotReply final :
                &_InstallSnapshotReply_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    6;
+    8;
 
   friend void swap(InstallSnapshotReply& a, InstallSnapshotReply& b) {
     a.Swap(&b);
@@ -1859,6 +2219,154 @@ inline void RequestVoteReply::set_votestate(int32_t value) {
 
 // -------------------------------------------------------------------
 
+// PreVoteArgs
+
+// int32 Term = 1;
+inline void PreVoteArgs::clear_term() {
+  _impl_.term_ = 0;
+}
+inline int32_t PreVoteArgs::_internal_term() const {
+  return _impl_.term_;
+}
+inline int32_t PreVoteArgs::term() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.PreVoteArgs.Term)
+  return _internal_term();
+}
+inline void PreVoteArgs::_internal_set_term(int32_t value) {
+  
+  _impl_.term_ = value;
+}
+inline void PreVoteArgs::set_term(int32_t value) {
+  _internal_set_term(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.PreVoteArgs.Term)
+}
+
+// int32 CandidateId = 2;
+inline void PreVoteArgs::clear_candidateid() {
+  _impl_.candidateid_ = 0;
+}
+inline int32_t PreVoteArgs::_internal_candidateid() const {
+  return _impl_.candidateid_;
+}
+inline int32_t PreVoteArgs::candidateid() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.PreVoteArgs.CandidateId)
+  return _internal_candidateid();
+}
+inline void PreVoteArgs::_internal_set_candidateid(int32_t value) {
+  
+  _impl_.candidateid_ = value;
+}
+inline void PreVoteArgs::set_candidateid(int32_t value) {
+  _internal_set_candidateid(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.PreVoteArgs.CandidateId)
+}
+
+// int32 LastLogTerm = 3;
+inline void PreVoteArgs::clear_lastlogterm() {
+  _impl_.lastlogterm_ = 0;
+}
+inline int32_t PreVoteArgs::_internal_lastlogterm() const {
+  return _impl_.lastlogterm_;
+}
+inline int32_t PreVoteArgs::lastlogterm() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.PreVoteArgs.LastLogTerm)
+  return _internal_lastlogterm();
+}
+inline void PreVoteArgs::_internal_set_lastlogterm(int32_t value) {
+  
+  _impl_.lastlogterm_ = value;
+}
+inline void PreVoteArgs::set_lastlogterm(int32_t value) {
+  _internal_set_lastlogterm(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.PreVoteArgs.LastLogTerm)
+}
+
+// int32 LastLogIndex = 4;
+inline void PreVoteArgs::clear_lastlogindex() {
+  _impl_.lastlogindex_ = 0;
+}
+inline int32_t PreVoteArgs::_internal_lastlogindex() const {
+  return _impl_.lastlogindex_;
+}
+inline int32_t PreVoteArgs::lastlogindex() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.PreVoteArgs.LastLogIndex)
+  return _internal_lastlogindex();
+}
+inline void PreVoteArgs::_internal_set_lastlogindex(int32_t value) {
+  
+  _impl_.lastlogindex_ = value;
+}
+inline void PreVoteArgs::set_lastlogindex(int32_t value) {
+  _internal_set_lastlogindex(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.PreVoteArgs.LastLogIndex)
+}
+
+// -------------------------------------------------------------------
+
+// PreVoteReply
+
+// int32 Term = 1;
+inline void PreVoteReply::clear_term() {
+  _impl_.term_ = 0;
+}
+inline int32_t PreVoteReply::_internal_term() const {
+  return _impl_.term_;
+}
+inline int32_t PreVoteReply::term() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.PreVoteReply.Term)
+  return _internal_term();
+}
+inline void PreVoteReply::_internal_set_term(int32_t value) {
+  
+  _impl_.term_ = value;
+}
+inline void PreVoteReply::set_term(int32_t value) {
+  _internal_set_term(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.PreVoteReply.Term)
+}
+
+// bool Granted = 2;
+inline void PreVoteReply::clear_granted() {
+  _impl_.granted_ = false;
+}
+inline bool PreVoteReply::_internal_granted() const {
+  return _impl_.granted_;
+}
+inline bool PreVoteReply::granted() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.PreVoteReply.Granted)
+  return _internal_granted();
+}
+inline void PreVoteReply::_internal_set_granted(bool value) {
+  
+  _impl_.granted_ = value;
+}
+inline void PreVoteReply::set_granted(bool value) {
+  _internal_set_granted(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.PreVoteReply.Granted)
+}
+
+// int32 VoteState = 3;
+inline void PreVoteReply::clear_votestate() {
+  _impl_.votestate_ = 0;
+}
+inline int32_t PreVoteReply::_internal_votestate() const {
+  return _impl_.votestate_;
+}
+inline int32_t PreVoteReply::votestate() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.PreVoteReply.VoteState)
+  return _internal_votestate();
+}
+inline void PreVoteReply::_internal_set_votestate(int32_t value) {
+  
+  _impl_.votestate_ = value;
+}
+inline void PreVoteReply::set_votestate(int32_t value) {
+  _internal_set_votestate(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.PreVoteReply.VoteState)
+}
+
+// -------------------------------------------------------------------
+
 // InstallSnapshotArgs
 
 // int32 LeaderId = 1;
@@ -2038,6 +2546,10 @@ inline void InstallSnapshotReply::set_term(int32_t value) {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

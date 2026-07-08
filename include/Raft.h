@@ -37,6 +37,8 @@ public:
 
     void OnRequestVote(const RaftRpc::RequestVoteArgs *request,
                        RaftRpc::RequestVoteReply *reply) override;
+
+    void OnPreVote(const RaftRpc::PreVoteArgs* request, RaftRpc::PreVoteReply* reply) override;
     void OnAppendEntriesStreamOn(std::unique_ptr<AppendEntriesResponder> responder,
                                  const std::string &peer) override;
     void OnAppendEntries(const RaftRpc::AppendEntriesArgs *request,
@@ -113,6 +115,7 @@ private:
     void handleDeadlines();
     void resetElectionDeadline();
     void resetHeartbeatDeadline();
+    void beginPreVote();
     void beginElection();
     void becomeFollower(int term);
     void becomeLeader();
@@ -120,8 +123,10 @@ private:
     void scheduleReplication(int server);
     void launchAppendEntries(int server, RaftRpc::AppendEntriesArgs request);
     void launchSnapshot(int server, RaftRpc::InstallSnapshotArgs request);
+
     void handleVoteReply(int server, int requestTerm, bool transportOk,
                          RaftRpc::RequestVoteReply reply);
+    void handlePreReply(int server, int requestTerm, bool transportOk, RaftRpc::PreVoteReply reply);
     void handleAppendReply(int server, int requestTerm,
                            RaftRpc::AppendEntriesArgs request,
                            bool transportOk, RaftRpc::AppendEntriesReply reply);
@@ -129,6 +134,7 @@ private:
                              RaftRpc::InstallSnapshotReply reply);
     void handleRequestVote(const RaftRpc::RequestVoteArgs &request,
                            RaftRpc::RequestVoteReply *reply);
+    void handlePreVote(const RaftRpc::PreVoteArgs& request, RaftRpc::PreVoteReply* reply);
     void handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int server);
     void handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request, int server);
     void applyCommitted();
@@ -191,6 +197,7 @@ private:
 
     Clock::time_point lastResetElectionTime_;
     Clock::time_point lastResetHeartBeatTime_;
+    Clock::time_point lastHeardHeartBeatTime_; // for preVote
     Clock::time_point electionDeadline_;
     Clock::time_point heartbeatDeadline_;
     Clock::time_point snapshotDeadline_; // snapshot超时时间 通过轮询检查内存日志数量来决定是否生成快照

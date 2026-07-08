@@ -5,6 +5,7 @@ const int DebugFactor = 2; //用于控制超时时间
 const int AppendEntriesTimeOut = 20 * DebugFactor; //ms AppendEntries通信超时
 const int InstallSnapshotTimeOut = 20 * DebugFactor;
 const int HeartBeatTimeOut = 25 * DebugFactor; //ms 心跳超时
+const int PreVoteTimeOut = 500 * DebugFactor;
 const int ElectionTimeOut = 500 * DebugFactor; //ms 选举超时
 const int ApplyInterval = 10 * DebugFactor; //Raft节点apply日志的间隔
 

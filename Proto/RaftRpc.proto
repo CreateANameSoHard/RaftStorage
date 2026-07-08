@@ -1,12 +1,16 @@
 syntax="proto3";
 package RaftRpc;
+
+// protoc RaftRpc.proto -I ./ --cpp_out=./
+// protoc RaftRpc.proto -I ./ --grpc_out=./ --plugin=protoc-gen-grpc=`which grpc_cpp_plugin`
+
 //Raft节点状态
 enum RaftState
 {
     RAFT_FOLLOWER=0;
     RAFT_CANDIDATE=1;
     RAFT_LEADER=2;
-    //RAFT_PRECANDIDATE=3;
+    RAFT_PRECANDIDATE=3;
 }
 
 //日志
@@ -52,6 +56,20 @@ message RequestVoteReply
     int32 VoteState=3; //当前节点状态
 }
 
+message PreVoteArgs
+{
+    int32 Term=1; 
+    int32 CandidateId=2; 
+    int32 LastLogTerm=3;
+    int32 LastLogIndex=4;
+}
+message PreVoteReply
+{
+    int32 Term=1; 
+    bool Granted=2; 
+    int32 VoteState=3; 
+}
+
 //快照下载
 message InstallSnapshotArgs
 {
@@ -72,6 +90,7 @@ message InstallSnapshotReply
 service RaftRpc
 {
     rpc RequestVote(RequestVoteArgs) returns(RequestVoteReply);
+    rpc PreVote(PreVoteArgs) returns(PreVoteReply);
     rpc AppendEntries(stream AppendEntriesArgs) returns(stream AppendEntriesReply); //AppendEntries用双向流
     rpc InstallSnapshot(stream InstallSnapshotArgs) returns(stream InstallSnapshotReply); //InstallSnapshot用单向流
 }

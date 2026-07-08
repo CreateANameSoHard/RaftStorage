@@ -65,6 +65,43 @@ grpc::ServerUnaryReactor *RaftServer::RequestVote(grpc::CallbackServerContext *c
 {
     return new RequestVoteReactor(context, request, reply, handler_);
 }
+
+class PreVoteReactor : public grpc::ServerUnaryReactor
+{
+public:
+    PreVoteReactor(grpc::CallbackServerContext *context, const RaftRpc::PreVoteArgs *request, RaftRpc::PreVoteReply*reply, RaftRpcHandler *handler)
+        : context_(context),
+          request_(request),
+          reply_(reply),
+          handler_(handler)
+    {
+        DPrintf("[start PreVoteRpc]");
+        // 上层需要能获得reply
+        handler_->OnPreVote(request_, reply_);
+        Finish(grpc::Status::OK);
+    }
+
+private:
+    void OnDone() override
+    {
+        std::cout << "[PreVoteRpc Completed]" << std::endl;
+        delete this;
+    }
+    void OnCancel() override
+    {
+        std::cerr << "[PreVoteRpc Canceled] peer: " << context_->peer() << std::endl;
+    }
+    grpc::CallbackServerContext *context_;
+    const RaftRpc::PreVoteArgs *request_;
+    RaftRpc::PreVoteReply* reply_;
+    RaftRpcHandler *handler_;
+};
+
+grpc::ServerUnaryReactor *RaftServer::PreVote(grpc::CallbackServerContext *context, const RaftRpc::PreVoteArgs *request, RaftRpc::PreVoteReply*reply)
+{
+    return new PreVoteReactor(context, request, reply, handler_);
+}
+
 // Reactor仅用于异步读数据
 // 需要耦合Responder、Reactor和handler handler用于执行回调 Responder用于发送响应且Responder用于上层
 class InstallSnapshotReactor : public grpc::ServerBidiReactor<RaftRpc::InstallSnapshotArgs, RaftRpc::InstallSnapshotReply>
@@ -409,6 +446,17 @@ bool RaftClient::RequestVote(grpc::ClientContext *context, RaftRpc::RequestVoteA
     if (!status.ok())
     {
         DPrintf("[Client RequestVote] something wrong: %s", status.error_message().c_str());
+        return false;
+    }
+    return true;
+}
+
+bool RaftClient::PreVote(grpc::ClientContext* context, RaftRpc::PreVoteArgs& request, RaftRpc::PreVoteReply* reply)
+{
+    auto status = stub_->PreVote(context, request, reply);
+    if (!status.ok())
+    {
+        DPrintf("[Client PreVote] something wrong: %s", status.error_message().c_str());
         return false;
     }
     return true;

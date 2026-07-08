@@ -73,6 +73,7 @@ Raft::Raft(std::string ip, std::string port,
     const auto now = Clock::now();
     lastResetElectionTime_ = now;
     lastResetHeartBeatTime_ = now;
+    lastHeardHeartBeatTime_ = now;
     resetElectionDeadline();
     resetHeartbeatDeadline();
     snapshotDeadline_ = now + std::chrono::milliseconds(SnapshotCheckInterval);
@@ -231,8 +232,8 @@ void Raft::handleDeadlines()
     }
     else if (now >= electionDeadline_)
     {
-        DPrintf("[handleDeadlines] Server %d start election", id_);
-        beginElection();
+        DPrintf("[handleDeadlines] Server %d start PreVote", id_);
+        beginPreVote();
     }
 
     if (now >= snapshotDeadline_)
@@ -298,6 +299,7 @@ void Raft::OnRequestVote(const RaftRpc::RequestVoteArgs *request,
     *reply = future.get();
 }
 
+
 void Raft::handleRequestVote(const RaftRpc::RequestVoteArgs &request,
                              RaftRpc::RequestVoteReply *reply)
 {
@@ -333,6 +335,43 @@ void Raft::handleRequestVote(const RaftRpc::RequestVoteArgs &request,
     reply->set_votegranted(granted);
     reply->set_votestate(granted ? Normal : (mayVote ? LogOutdated : Voted));
 }
+
+void Raft::OnPreVote(const RaftRpc::PreVoteArgs* request, RaftRpc::PreVoteReply* reply)
+{
+    auto promise = std::make_shared<std::promise<RaftRpc::PreVoteReply>>();
+    auto future = promise->get_future();
+    RaftRpc::PreVoteArgs copy = *request;
+    postControl([this, copy = std::move(copy), promise]{
+        RaftRpc::PreVoteReply result;
+        handlePreVote(copy, &result);
+        promise->set_value(std::move(result));
+    });
+    *reply = future.get();
+}
+
+// 逻辑和投票逻辑是一样的
+void Raft::handlePreVote(const RaftRpc::PreVoteArgs& request, RaftRpc::PreVoteReply* reply)
+{
+    if(request.term() > currentTerm_)
+        becomeFollower(request.term());
+    if(request.term() < currentTerm_)
+    {
+        reply->set_term(currentTerm_);
+        reply->set_granted(false);
+        reply->set_votestate(Expired);
+        return;
+    }
+    myAssert(request.term() == currentTerm_, "assert {request.term() == currentTerm_} fail in handlePreVote");
+
+    auto now = std::chrono::steady_clock::now();
+    // PreVote不需要看votedFor
+    bool mayVote = now - lastHeardHeartBeatTime_ > std::chrono::milliseconds(HeartBeatTimeOut);
+    bool upToDate = whetherVoteFor(request.lastlogindex(), request.lastlogterm());
+    reply->set_term(currentTerm_);
+    reply->set_granted(upToDate && mayVote);
+    reply->set_votestate(upToDate ? Normal: LogOutdated);
+}
+
 
 void Raft::OnAppendEntriesStreamOn(
     std::unique_ptr<AppendEntriesResponder> responder, const std::string &peer)
@@ -373,6 +412,7 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
         if (status_ != RaftRpc::RAFT_FOLLOWER)
             status_ = RaftRpc::RAFT_FOLLOWER;
         resetElectionDeadline();
+        lastHeardHeartBeatTime_ = std::chrono::steady_clock::now();
 
         bool matches = matchLog(request.prelogindex(), request.prelogterm());
         if (!matches)
@@ -404,7 +444,6 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
                 {
                     // 扩容后默认元素的logindex为0（getlastLogIndex为0） 然后传入的logindex不为0 导致错误
                     // logs_[getSlicesIndexFromLogIndex(request->entries(i).logindex())] = request->entries(i);
-                    // 这里避免用getSliceLogIndex
                     const int pos = getSlicesIndexFromLogIndex(incoming.logindex());
                     if (logs_[pos].logterm() != incoming.logterm())
                     {
@@ -486,6 +525,7 @@ void Raft::handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request,
 
         status_ = RaftRpc::RAFT_FOLLOWER;
         resetElectionDeadline();
+        lastHeardHeartBeatTime_ = std::chrono::steady_clock::now();
         if (request.lastsnapshotincludeindex() > lastIncludeSnapshotIndex_)
         {
             const int snapshotIndex = request.lastsnapshotincludeindex();
@@ -538,6 +578,62 @@ void Raft::OnInstallSnapshotStreamClose(const std::string &peer)
             it->second.ISResponder->Close();
             it->second.ISResponder.reset();
         } });
+}
+//TODO: add beginPreVote
+void Raft::beginPreVote()
+{
+    // status maybe follower, precandidate, but never leader
+    if(stop_.load() || status_ == RaftRpc::RAFT_LEADER)
+        return;
+    status_ = RaftRpc::RAFT_PRECANDIDATE;
+    votesGranted_ = 1; // 因为PreVote和Vote不会并行 所以这里用是没问题的
+    resetElectionDeadline();
+    // prevote 并不会加term 也不会保存voteFor
+    int lastIndex, lastTerm;
+    getLastLogIndexAndTerm(&lastIndex, &lastTerm);
+    for(const auto& peer: peers_)
+    {
+        RaftRpc::PreVoteArgs request;
+        request.set_term(currentTerm_);
+        request.set_candidateid(id_);
+        request.set_lastlogindex(lastIndex);
+        request.set_lastlogterm(lastTerm);
+        const int server = peer.first;
+        threadPool_->submit([this, request, server]()mutable{
+            RaftRpc::PreVoteReply reply;
+            grpc::ClientContext context;
+            context.AddMetadata("node-id", std::to_string(id_));
+            context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(PreVoteTimeOut));
+            const bool ok =
+                clients_.at(server)->PreVote(&context, request, &reply);
+            postControl([this, server, term = request.term(), ok, reply](){
+                handlePreReply(server, term, ok, reply);
+            });
+        });
+    }
+    // if only one node in group, this statement will win the vote
+    if(votesGranted_ >= static_cast<int>(peers_.size()/2 + 1))
+    {
+        DPrintf("[beginPreVote] PreVote success, start election");
+        beginElection();
+    }
+}
+
+void Raft::handlePreReply(int server, int requestTerm, bool transportOk, RaftRpc::PreVoteReply reply)
+{
+    if(!transportOk) return;
+    if(requestTerm > currentTerm_)
+    {
+        becomeFollower(reply.term());
+        return;
+    }
+    if(status_ != RaftRpc::RAFT_PRECANDIDATE || requestTerm != currentTerm_)
+        return;
+    if(reply.granted() && ++votesGranted_ >= static_cast<int>(peers_.size()/2 + 1))
+    {
+        DPrintf("[beginPreVote] PreVote success, start election");
+        beginElection();
+    }
 }
 
 void Raft::beginElection()
@@ -635,6 +731,8 @@ void Raft::becomeLeader()
     entry.set_logterm(currentTerm_);
     logs_.emplace_back(entry);
 
+    persist();
+
     scheduleAllReplication();
 }
 
@@ -703,6 +801,7 @@ void Raft::handleAppendReply(int server, int requestTerm,
     if (!transportOk)
     {
         // NOTE:如果一个节点从分区中恢复，那么可能因为grpc的指数退避而超时触发选举
+        // 所以必须要关闭grpc对特定链接的指数退避
         grpc::experimental::ChannelResetConnectionBackoff(peers_.at(server).get());
     }
     // 凡是收到消息 就要判断term

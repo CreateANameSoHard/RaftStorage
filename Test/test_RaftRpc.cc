@@ -78,6 +78,33 @@ TEST_F(RaftRpcTest, RequestVoteTest)
     EXPECT_EQ(reply.votestate(), 1);
 };
 
+TEST_F(RaftRpcTest, PreVoteTest)
+{
+    EXPECT_CALL(*handler_, OnPreVote(testing::_, testing::_))
+        .Times(1)
+        .WillOnce(testing::Invoke(
+            [](const RaftRpc::PreVoteArgs *request, RaftRpc::PreVoteReply *reply)
+            {
+                std::cout << "[Mock OnPreVote]" << std::endl;
+                reply->set_term(1);
+                reply->set_granted(true);
+                reply->set_votestate(1);
+            }));
+
+    grpc::ClientContext context;
+    RaftRpc::PreVoteArgs request;
+    RaftRpc::PreVoteReply reply;
+    request.set_term(1);
+    request.set_candidateid(1);
+    request.set_lastlogindex(1);
+    request.set_lastlogterm(1);
+    client_->PreVote(&context, request, &reply);
+
+    EXPECT_EQ(reply.term(), 1);
+    EXPECT_EQ(reply.granted(), true);
+    EXPECT_EQ(reply.votestate(), 1);
+};
+
 TEST_F(RaftRpcTest, AppendEntriesTest)
 {
     std::unique_ptr<AppendEntriesResponder> serverStream;
@@ -88,7 +115,9 @@ TEST_F(RaftRpcTest, AppendEntriesTest)
             .WillOnce([&](std::unique_ptr<AppendEntriesResponder> responder, const std::string& peer)
                       {
                 serverStream = std::move(responder);
-                std::cout << "AppendEntries Stream got" << std::endl; });
+                std::cout << "AppendEntries Stream got" << std::endl; 
+                EXPECT_EQ(std::stoi(peer), 1);
+            });
         EXPECT_CALL(*handler_, OnAppendEntries(testing::_, testing::_))
             .Times(testing::AtLeast(1))
             .WillRepeatedly([&](const RaftRpc::AppendEntriesArgs *request, const std::string& peer)
@@ -97,6 +126,7 @@ TEST_F(RaftRpcTest, AppendEntriesTest)
                 EXPECT_EQ(request->leaderid(), 2);
                 EXPECT_EQ(request->prelogterm(), 1);
                 EXPECT_EQ(request->prelogindex(), 10);
+                EXPECT_EQ(std::stoi(peer), 1);
 
                 RaftRpc::AppendEntriesReply reply;
                 reply.set_term(1);
@@ -133,6 +163,8 @@ TEST_F(RaftRpcTest, AppendEntriesTest)
     */
 
     grpc::ClientContext context;
+    context.AddMetadata("node-id", std::to_string(1));
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(1000));
     RaftRpc::AppendEntriesArgs request;
     RaftRpc::AppendEntriesReply reply;
     request.set_term(1);
@@ -184,6 +216,7 @@ TEST_F(RaftRpcTest, InstallSnapshotTest)
                 {
                     serverStream = std::move(responder);
                     std::cout << "InstallSnapshot Stream got" << std::endl;
+                    EXPECT_EQ(std::stoi(peer), 1);
                 });
         EXPECT_CALL(*handler_, OnInstallSnapshotChunk(testing::_, testing::_))
             .Times(testing::AtLeast(1))
@@ -196,6 +229,7 @@ TEST_F(RaftRpcTest, InstallSnapshotTest)
                     EXPECT_EQ(request->lastsnapshotincludeterm(), 10);
                     EXPECT_EQ(request->data(), "you are gay");
                     EXPECT_EQ(request->offset(), 0);
+                    EXPECT_EQ(std::stoi(peer), 1);
 
                     RaftRpc::InstallSnapshotReply reply;
                     reply.set_term(1);
@@ -214,6 +248,8 @@ TEST_F(RaftRpcTest, InstallSnapshotTest)
     }
 
     grpc::ClientContext context;
+    context.AddMetadata("node-id", std::to_string(1));
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(1000));
     RaftRpc::InstallSnapshotArgs request;
     RaftRpc::InstallSnapshotReply reply;
     /*

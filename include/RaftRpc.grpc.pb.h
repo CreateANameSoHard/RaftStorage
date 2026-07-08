@@ -42,6 +42,13 @@ class RaftRpc final {
     std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::RequestVoteReply>> PrepareAsyncRequestVote(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::RequestVoteReply>>(PrepareAsyncRequestVoteRaw(context, request, cq));
     }
+    virtual ::grpc::Status PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::RaftRpc::PreVoteReply* response) = 0;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::PreVoteReply>> AsyncPreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::PreVoteReply>>(AsyncPreVoteRaw(context, request, cq));
+    }
+    std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::PreVoteReply>> PrepareAsyncPreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::PreVoteReply>>(PrepareAsyncPreVoteRaw(context, request, cq));
+    }
     std::unique_ptr< ::grpc::ClientReaderWriterInterface< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>> AppendEntries(::grpc::ClientContext* context) {
       return std::unique_ptr< ::grpc::ClientReaderWriterInterface< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>>(AppendEntriesRaw(context));
     }
@@ -67,6 +74,8 @@ class RaftRpc final {
       virtual ~async_interface() {}
       virtual void RequestVote(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs* request, ::RaftRpc::RequestVoteReply* response, std::function<void(::grpc::Status)>) = 0;
       virtual void RequestVote(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs* request, ::RaftRpc::RequestVoteReply* response, ::grpc::ClientUnaryReactor* reactor) = 0;
+      virtual void PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response, std::function<void(::grpc::Status)>) = 0;
+      virtual void PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response, ::grpc::ClientUnaryReactor* reactor) = 0;
       virtual void AppendEntries(::grpc::ClientContext* context, ::grpc::ClientBidiReactor< ::RaftRpc::AppendEntriesArgs,::RaftRpc::AppendEntriesReply>* reactor) = 0;
       // AppendEntries用双向流
       virtual void InstallSnapshot(::grpc::ClientContext* context, ::grpc::ClientBidiReactor< ::RaftRpc::InstallSnapshotArgs,::RaftRpc::InstallSnapshotReply>* reactor) = 0;
@@ -78,6 +87,8 @@ class RaftRpc final {
    private:
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::RequestVoteReply>* AsyncRequestVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::RequestVoteReply>* PrepareAsyncRequestVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::PreVoteReply>* AsyncPreVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) = 0;
+    virtual ::grpc::ClientAsyncResponseReaderInterface< ::RaftRpc::PreVoteReply>* PrepareAsyncPreVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) = 0;
     virtual ::grpc::ClientReaderWriterInterface< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>* AppendEntriesRaw(::grpc::ClientContext* context) = 0;
     virtual ::grpc::ClientAsyncReaderWriterInterface< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>* AsyncAppendEntriesRaw(::grpc::ClientContext* context, ::grpc::CompletionQueue* cq, void* tag) = 0;
     virtual ::grpc::ClientAsyncReaderWriterInterface< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>* PrepareAsyncAppendEntriesRaw(::grpc::ClientContext* context, ::grpc::CompletionQueue* cq) = 0;
@@ -94,6 +105,13 @@ class RaftRpc final {
     }
     std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::RaftRpc::RequestVoteReply>> PrepareAsyncRequestVote(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs& request, ::grpc::CompletionQueue* cq) {
       return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::RaftRpc::RequestVoteReply>>(PrepareAsyncRequestVoteRaw(context, request, cq));
+    }
+    ::grpc::Status PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::RaftRpc::PreVoteReply* response) override;
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::RaftRpc::PreVoteReply>> AsyncPreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::RaftRpc::PreVoteReply>>(AsyncPreVoteRaw(context, request, cq));
+    }
+    std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::RaftRpc::PreVoteReply>> PrepareAsyncPreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) {
+      return std::unique_ptr< ::grpc::ClientAsyncResponseReader< ::RaftRpc::PreVoteReply>>(PrepareAsyncPreVoteRaw(context, request, cq));
     }
     std::unique_ptr< ::grpc::ClientReaderWriter< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>> AppendEntries(::grpc::ClientContext* context) {
       return std::unique_ptr< ::grpc::ClientReaderWriter< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>>(AppendEntriesRaw(context));
@@ -118,6 +136,8 @@ class RaftRpc final {
      public:
       void RequestVote(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs* request, ::RaftRpc::RequestVoteReply* response, std::function<void(::grpc::Status)>) override;
       void RequestVote(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs* request, ::RaftRpc::RequestVoteReply* response, ::grpc::ClientUnaryReactor* reactor) override;
+      void PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response, std::function<void(::grpc::Status)>) override;
+      void PreVote(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response, ::grpc::ClientUnaryReactor* reactor) override;
       void AppendEntries(::grpc::ClientContext* context, ::grpc::ClientBidiReactor< ::RaftRpc::AppendEntriesArgs,::RaftRpc::AppendEntriesReply>* reactor) override;
       void InstallSnapshot(::grpc::ClientContext* context, ::grpc::ClientBidiReactor< ::RaftRpc::InstallSnapshotArgs,::RaftRpc::InstallSnapshotReply>* reactor) override;
      private:
@@ -133,6 +153,8 @@ class RaftRpc final {
     class async async_stub_{this};
     ::grpc::ClientAsyncResponseReader< ::RaftRpc::RequestVoteReply>* AsyncRequestVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientAsyncResponseReader< ::RaftRpc::RequestVoteReply>* PrepareAsyncRequestVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::RequestVoteArgs& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::RaftRpc::PreVoteReply>* AsyncPreVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) override;
+    ::grpc::ClientAsyncResponseReader< ::RaftRpc::PreVoteReply>* PrepareAsyncPreVoteRaw(::grpc::ClientContext* context, const ::RaftRpc::PreVoteArgs& request, ::grpc::CompletionQueue* cq) override;
     ::grpc::ClientReaderWriter< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>* AppendEntriesRaw(::grpc::ClientContext* context) override;
     ::grpc::ClientAsyncReaderWriter< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>* AsyncAppendEntriesRaw(::grpc::ClientContext* context, ::grpc::CompletionQueue* cq, void* tag) override;
     ::grpc::ClientAsyncReaderWriter< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>* PrepareAsyncAppendEntriesRaw(::grpc::ClientContext* context, ::grpc::CompletionQueue* cq) override;
@@ -140,6 +162,7 @@ class RaftRpc final {
     ::grpc::ClientAsyncReaderWriter< ::RaftRpc::InstallSnapshotArgs, ::RaftRpc::InstallSnapshotReply>* AsyncInstallSnapshotRaw(::grpc::ClientContext* context, ::grpc::CompletionQueue* cq, void* tag) override;
     ::grpc::ClientAsyncReaderWriter< ::RaftRpc::InstallSnapshotArgs, ::RaftRpc::InstallSnapshotReply>* PrepareAsyncInstallSnapshotRaw(::grpc::ClientContext* context, ::grpc::CompletionQueue* cq) override;
     const ::grpc::internal::RpcMethod rpcmethod_RequestVote_;
+    const ::grpc::internal::RpcMethod rpcmethod_PreVote_;
     const ::grpc::internal::RpcMethod rpcmethod_AppendEntries_;
     const ::grpc::internal::RpcMethod rpcmethod_InstallSnapshot_;
   };
@@ -150,6 +173,7 @@ class RaftRpc final {
     Service();
     virtual ~Service();
     virtual ::grpc::Status RequestVote(::grpc::ServerContext* context, const ::RaftRpc::RequestVoteArgs* request, ::RaftRpc::RequestVoteReply* response);
+    virtual ::grpc::Status PreVote(::grpc::ServerContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response);
     virtual ::grpc::Status AppendEntries(::grpc::ServerContext* context, ::grpc::ServerReaderWriter< ::RaftRpc::AppendEntriesReply, ::RaftRpc::AppendEntriesArgs>* stream);
     // AppendEntries用双向流
     virtual ::grpc::Status InstallSnapshot(::grpc::ServerContext* context, ::grpc::ServerReaderWriter< ::RaftRpc::InstallSnapshotReply, ::RaftRpc::InstallSnapshotArgs>* stream);
@@ -176,12 +200,32 @@ class RaftRpc final {
     }
   };
   template <class BaseClass>
+  class WithAsyncMethod_PreVote : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithAsyncMethod_PreVote() {
+      ::grpc::Service::MarkMethodAsync(1);
+    }
+    ~WithAsyncMethod_PreVote() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status PreVote(::grpc::ServerContext* /*context*/, const ::RaftRpc::PreVoteArgs* /*request*/, ::RaftRpc::PreVoteReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    void RequestPreVote(::grpc::ServerContext* context, ::RaftRpc::PreVoteArgs* request, ::grpc::ServerAsyncResponseWriter< ::RaftRpc::PreVoteReply>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(1, context, request, response, new_call_cq, notification_cq, tag);
+    }
+  };
+  template <class BaseClass>
   class WithAsyncMethod_AppendEntries : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithAsyncMethod_AppendEntries() {
-      ::grpc::Service::MarkMethodAsync(1);
+      ::grpc::Service::MarkMethodAsync(2);
     }
     ~WithAsyncMethod_AppendEntries() override {
       BaseClassMustBeDerivedFromService(this);
@@ -192,7 +236,7 @@ class RaftRpc final {
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     void RequestAppendEntries(::grpc::ServerContext* context, ::grpc::ServerAsyncReaderWriter< ::RaftRpc::AppendEntriesReply, ::RaftRpc::AppendEntriesArgs>* stream, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncBidiStreaming(1, context, stream, new_call_cq, notification_cq, tag);
+      ::grpc::Service::RequestAsyncBidiStreaming(2, context, stream, new_call_cq, notification_cq, tag);
     }
   };
   template <class BaseClass>
@@ -201,7 +245,7 @@ class RaftRpc final {
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithAsyncMethod_InstallSnapshot() {
-      ::grpc::Service::MarkMethodAsync(2);
+      ::grpc::Service::MarkMethodAsync(3);
     }
     ~WithAsyncMethod_InstallSnapshot() override {
       BaseClassMustBeDerivedFromService(this);
@@ -212,10 +256,10 @@ class RaftRpc final {
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     void RequestInstallSnapshot(::grpc::ServerContext* context, ::grpc::ServerAsyncReaderWriter< ::RaftRpc::InstallSnapshotReply, ::RaftRpc::InstallSnapshotArgs>* stream, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncBidiStreaming(2, context, stream, new_call_cq, notification_cq, tag);
+      ::grpc::Service::RequestAsyncBidiStreaming(3, context, stream, new_call_cq, notification_cq, tag);
     }
   };
-  typedef WithAsyncMethod_RequestVote<WithAsyncMethod_AppendEntries<WithAsyncMethod_InstallSnapshot<Service > > > AsyncService;
+  typedef WithAsyncMethod_RequestVote<WithAsyncMethod_PreVote<WithAsyncMethod_AppendEntries<WithAsyncMethod_InstallSnapshot<Service > > > > AsyncService;
   template <class BaseClass>
   class WithCallbackMethod_RequestVote : public BaseClass {
    private:
@@ -244,12 +288,39 @@ class RaftRpc final {
       ::grpc::CallbackServerContext* /*context*/, const ::RaftRpc::RequestVoteArgs* /*request*/, ::RaftRpc::RequestVoteReply* /*response*/)  { return nullptr; }
   };
   template <class BaseClass>
+  class WithCallbackMethod_PreVote : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithCallbackMethod_PreVote() {
+      ::grpc::Service::MarkMethodCallback(1,
+          new ::grpc::internal::CallbackUnaryHandler< ::RaftRpc::PreVoteArgs, ::RaftRpc::PreVoteReply>(
+            [this](
+                   ::grpc::CallbackServerContext* context, const ::RaftRpc::PreVoteArgs* request, ::RaftRpc::PreVoteReply* response) { return this->PreVote(context, request, response); }));}
+    void SetMessageAllocatorFor_PreVote(
+        ::grpc::MessageAllocator< ::RaftRpc::PreVoteArgs, ::RaftRpc::PreVoteReply>* allocator) {
+      ::grpc::internal::MethodHandler* const handler = ::grpc::Service::GetHandler(1);
+      static_cast<::grpc::internal::CallbackUnaryHandler< ::RaftRpc::PreVoteArgs, ::RaftRpc::PreVoteReply>*>(handler)
+              ->SetMessageAllocator(allocator);
+    }
+    ~WithCallbackMethod_PreVote() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status PreVote(::grpc::ServerContext* /*context*/, const ::RaftRpc::PreVoteArgs* /*request*/, ::RaftRpc::PreVoteReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual ::grpc::ServerUnaryReactor* PreVote(
+      ::grpc::CallbackServerContext* /*context*/, const ::RaftRpc::PreVoteArgs* /*request*/, ::RaftRpc::PreVoteReply* /*response*/)  { return nullptr; }
+  };
+  template <class BaseClass>
   class WithCallbackMethod_AppendEntries : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithCallbackMethod_AppendEntries() {
-      ::grpc::Service::MarkMethodCallback(1,
+      ::grpc::Service::MarkMethodCallback(2,
           new ::grpc::internal::CallbackBidiHandler< ::RaftRpc::AppendEntriesArgs, ::RaftRpc::AppendEntriesReply>(
             [this](
                    ::grpc::CallbackServerContext* context) { return this->AppendEntries(context); }));
@@ -272,7 +343,7 @@ class RaftRpc final {
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithCallbackMethod_InstallSnapshot() {
-      ::grpc::Service::MarkMethodCallback(2,
+      ::grpc::Service::MarkMethodCallback(3,
           new ::grpc::internal::CallbackBidiHandler< ::RaftRpc::InstallSnapshotArgs, ::RaftRpc::InstallSnapshotReply>(
             [this](
                    ::grpc::CallbackServerContext* context) { return this->InstallSnapshot(context); }));
@@ -289,7 +360,7 @@ class RaftRpc final {
       ::grpc::CallbackServerContext* /*context*/)
       { return nullptr; }
   };
-  typedef WithCallbackMethod_RequestVote<WithCallbackMethod_AppendEntries<WithCallbackMethod_InstallSnapshot<Service > > > CallbackService;
+  typedef WithCallbackMethod_RequestVote<WithCallbackMethod_PreVote<WithCallbackMethod_AppendEntries<WithCallbackMethod_InstallSnapshot<Service > > > > CallbackService;
   typedef CallbackService ExperimentalCallbackService;
   template <class BaseClass>
   class WithGenericMethod_RequestVote : public BaseClass {
@@ -309,12 +380,29 @@ class RaftRpc final {
     }
   };
   template <class BaseClass>
+  class WithGenericMethod_PreVote : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithGenericMethod_PreVote() {
+      ::grpc::Service::MarkMethodGeneric(1);
+    }
+    ~WithGenericMethod_PreVote() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status PreVote(::grpc::ServerContext* /*context*/, const ::RaftRpc::PreVoteArgs* /*request*/, ::RaftRpc::PreVoteReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+  };
+  template <class BaseClass>
   class WithGenericMethod_AppendEntries : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithGenericMethod_AppendEntries() {
-      ::grpc::Service::MarkMethodGeneric(1);
+      ::grpc::Service::MarkMethodGeneric(2);
     }
     ~WithGenericMethod_AppendEntries() override {
       BaseClassMustBeDerivedFromService(this);
@@ -331,7 +419,7 @@ class RaftRpc final {
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithGenericMethod_InstallSnapshot() {
-      ::grpc::Service::MarkMethodGeneric(2);
+      ::grpc::Service::MarkMethodGeneric(3);
     }
     ~WithGenericMethod_InstallSnapshot() override {
       BaseClassMustBeDerivedFromService(this);
@@ -363,12 +451,32 @@ class RaftRpc final {
     }
   };
   template <class BaseClass>
+  class WithRawMethod_PreVote : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithRawMethod_PreVote() {
+      ::grpc::Service::MarkMethodRaw(1);
+    }
+    ~WithRawMethod_PreVote() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status PreVote(::grpc::ServerContext* /*context*/, const ::RaftRpc::PreVoteArgs* /*request*/, ::RaftRpc::PreVoteReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    void RequestPreVote(::grpc::ServerContext* context, ::grpc::ByteBuffer* request, ::grpc::ServerAsyncResponseWriter< ::grpc::ByteBuffer>* response, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
+      ::grpc::Service::RequestAsyncUnary(1, context, request, response, new_call_cq, notification_cq, tag);
+    }
+  };
+  template <class BaseClass>
   class WithRawMethod_AppendEntries : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithRawMethod_AppendEntries() {
-      ::grpc::Service::MarkMethodRaw(1);
+      ::grpc::Service::MarkMethodRaw(2);
     }
     ~WithRawMethod_AppendEntries() override {
       BaseClassMustBeDerivedFromService(this);
@@ -379,7 +487,7 @@ class RaftRpc final {
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     void RequestAppendEntries(::grpc::ServerContext* context, ::grpc::ServerAsyncReaderWriter< ::grpc::ByteBuffer, ::grpc::ByteBuffer>* stream, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncBidiStreaming(1, context, stream, new_call_cq, notification_cq, tag);
+      ::grpc::Service::RequestAsyncBidiStreaming(2, context, stream, new_call_cq, notification_cq, tag);
     }
   };
   template <class BaseClass>
@@ -388,7 +496,7 @@ class RaftRpc final {
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithRawMethod_InstallSnapshot() {
-      ::grpc::Service::MarkMethodRaw(2);
+      ::grpc::Service::MarkMethodRaw(3);
     }
     ~WithRawMethod_InstallSnapshot() override {
       BaseClassMustBeDerivedFromService(this);
@@ -399,7 +507,7 @@ class RaftRpc final {
       return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
     }
     void RequestInstallSnapshot(::grpc::ServerContext* context, ::grpc::ServerAsyncReaderWriter< ::grpc::ByteBuffer, ::grpc::ByteBuffer>* stream, ::grpc::CompletionQueue* new_call_cq, ::grpc::ServerCompletionQueue* notification_cq, void *tag) {
-      ::grpc::Service::RequestAsyncBidiStreaming(2, context, stream, new_call_cq, notification_cq, tag);
+      ::grpc::Service::RequestAsyncBidiStreaming(3, context, stream, new_call_cq, notification_cq, tag);
     }
   };
   template <class BaseClass>
@@ -425,12 +533,34 @@ class RaftRpc final {
       ::grpc::CallbackServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/)  { return nullptr; }
   };
   template <class BaseClass>
+  class WithRawCallbackMethod_PreVote : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithRawCallbackMethod_PreVote() {
+      ::grpc::Service::MarkMethodRawCallback(1,
+          new ::grpc::internal::CallbackUnaryHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
+            [this](
+                   ::grpc::CallbackServerContext* context, const ::grpc::ByteBuffer* request, ::grpc::ByteBuffer* response) { return this->PreVote(context, request, response); }));
+    }
+    ~WithRawCallbackMethod_PreVote() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable synchronous version of this method
+    ::grpc::Status PreVote(::grpc::ServerContext* /*context*/, const ::RaftRpc::PreVoteArgs* /*request*/, ::RaftRpc::PreVoteReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    virtual ::grpc::ServerUnaryReactor* PreVote(
+      ::grpc::CallbackServerContext* /*context*/, const ::grpc::ByteBuffer* /*request*/, ::grpc::ByteBuffer* /*response*/)  { return nullptr; }
+  };
+  template <class BaseClass>
   class WithRawCallbackMethod_AppendEntries : public BaseClass {
    private:
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithRawCallbackMethod_AppendEntries() {
-      ::grpc::Service::MarkMethodRawCallback(1,
+      ::grpc::Service::MarkMethodRawCallback(2,
           new ::grpc::internal::CallbackBidiHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
             [this](
                    ::grpc::CallbackServerContext* context) { return this->AppendEntries(context); }));
@@ -453,7 +583,7 @@ class RaftRpc final {
     void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
    public:
     WithRawCallbackMethod_InstallSnapshot() {
-      ::grpc::Service::MarkMethodRawCallback(2,
+      ::grpc::Service::MarkMethodRawCallback(3,
           new ::grpc::internal::CallbackBidiHandler< ::grpc::ByteBuffer, ::grpc::ByteBuffer>(
             [this](
                    ::grpc::CallbackServerContext* context) { return this->InstallSnapshot(context); }));
@@ -497,9 +627,36 @@ class RaftRpc final {
     // replace default version of method with streamed unary
     virtual ::grpc::Status StreamedRequestVote(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::RaftRpc::RequestVoteArgs,::RaftRpc::RequestVoteReply>* server_unary_streamer) = 0;
   };
-  typedef WithStreamedUnaryMethod_RequestVote<Service > StreamedUnaryService;
+  template <class BaseClass>
+  class WithStreamedUnaryMethod_PreVote : public BaseClass {
+   private:
+    void BaseClassMustBeDerivedFromService(const Service* /*service*/) {}
+   public:
+    WithStreamedUnaryMethod_PreVote() {
+      ::grpc::Service::MarkMethodStreamed(1,
+        new ::grpc::internal::StreamedUnaryHandler<
+          ::RaftRpc::PreVoteArgs, ::RaftRpc::PreVoteReply>(
+            [this](::grpc::ServerContext* context,
+                   ::grpc::ServerUnaryStreamer<
+                     ::RaftRpc::PreVoteArgs, ::RaftRpc::PreVoteReply>* streamer) {
+                       return this->StreamedPreVote(context,
+                         streamer);
+                  }));
+    }
+    ~WithStreamedUnaryMethod_PreVote() override {
+      BaseClassMustBeDerivedFromService(this);
+    }
+    // disable regular version of this method
+    ::grpc::Status PreVote(::grpc::ServerContext* /*context*/, const ::RaftRpc::PreVoteArgs* /*request*/, ::RaftRpc::PreVoteReply* /*response*/) override {
+      abort();
+      return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED, "");
+    }
+    // replace default version of method with streamed unary
+    virtual ::grpc::Status StreamedPreVote(::grpc::ServerContext* context, ::grpc::ServerUnaryStreamer< ::RaftRpc::PreVoteArgs,::RaftRpc::PreVoteReply>* server_unary_streamer) = 0;
+  };
+  typedef WithStreamedUnaryMethod_RequestVote<WithStreamedUnaryMethod_PreVote<Service > > StreamedUnaryService;
   typedef Service SplitStreamedService;
-  typedef WithStreamedUnaryMethod_RequestVote<Service > StreamedService;
+  typedef WithStreamedUnaryMethod_RequestVote<WithStreamedUnaryMethod_PreVote<Service > > StreamedService;
 };
 
 }  // namespace RaftRpc
