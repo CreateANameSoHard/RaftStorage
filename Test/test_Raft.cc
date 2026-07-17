@@ -21,9 +21,6 @@ protected:
         node1_ = std::make_unique<Raft>("127.0.0.1", "9000", idToAddr_, 1, persister1_, applyQue1_);
         node2_ = std::make_unique<Raft>("127.0.0.1", "9001", idToAddr_, 2, persister2_, applyQue2_);
         node3_ = std::make_unique<Raft>("127.0.0.1", "9002", idToAddr_, 3, persister3_, applyQue3_);
-        node1_->setSnapshotCallback(std::bind(&RaftTest::genSnapshot, this));
-        node2_->setSnapshotCallback(std::bind(&RaftTest::genSnapshot, this));
-        node3_->setSnapshotCallback(std::bind(&RaftTest::genSnapshot, this));
 
         idToNode_[1] = node1_.get();
         idToNode_[2] = node2_.get();
@@ -289,6 +286,12 @@ TEST_F(RaftTest, SnapshotPersistAndReadTest)
         leader->start(command, &newLogIndex, &newLogTerm, &isLeader);
         EXPECT_TRUE(isLeader);
     }
+    if(leader->needSnapshot(SnapshotThreshold))
+    {
+        leader->snapshot(SnapshotThreshold, genSnapshot());
+    }
+    else
+        FAIL() << "branchEntrance failed";
     // wait for persist snapshot
     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 

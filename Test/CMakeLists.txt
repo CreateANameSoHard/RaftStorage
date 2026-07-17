@@ -17,6 +17,7 @@ include_directories(./mock)
 
 add_executable(RaftRpcTest.out ./test_RaftRpc.cc ${common} ${raftrpc})
 add_executable(RaftTest.out ./test_Raft.cc ${common} ${raft})
+add_executable(KVServerTest.out ./test_KVServer.cc ${common} ${raft})
 
 target_link_libraries(RaftRpcTest.out
     PRIVATE
@@ -28,6 +29,14 @@ target_link_libraries(RaftRpcTest.out
 )
 
 target_link_libraries(RaftTest.out
+    PRIVATE
+    GTest::gtest_main
+    gRPC::grpc++
+    protobuf
+    pthread
+)
+
+target_link_libraries(KVServerTest.out
     PRIVATE
     GTest::gtest_main
     gRPC::grpc++

@@ -69,7 +69,7 @@ grpc::ServerUnaryReactor *RaftServer::RequestVote(grpc::CallbackServerContext *c
 class PreVoteReactor : public grpc::ServerUnaryReactor
 {
 public:
-    PreVoteReactor(grpc::CallbackServerContext *context, const RaftRpc::PreVoteArgs *request, RaftRpc::PreVoteReply*reply, RaftRpcHandler *handler)
+    PreVoteReactor(grpc::CallbackServerContext *context, const RaftRpc::PreVoteArgs *request, RaftRpc::PreVoteReply *reply, RaftRpcHandler *handler)
         : context_(context),
           request_(request),
           reply_(reply),
@@ -93,14 +93,22 @@ private:
     }
     grpc::CallbackServerContext *context_;
     const RaftRpc::PreVoteArgs *request_;
-    RaftRpc::PreVoteReply* reply_;
+    RaftRpc::PreVoteReply *reply_;
     RaftRpcHandler *handler_;
 };
 
-grpc::ServerUnaryReactor *RaftServer::PreVote(grpc::CallbackServerContext *context, const RaftRpc::PreVoteArgs *request, RaftRpc::PreVoteReply*reply)
+grpc::ServerUnaryReactor *RaftServer::PreVote(grpc::CallbackServerContext *context, const RaftRpc::PreVoteArgs *request, RaftRpc::PreVoteReply *reply)
 {
     return new PreVoteReactor(context, request, reply, handler_);
 }
+class InstallSnapshotReactor;
+struct InstallSnapshotStreamState
+{
+    std::mutex mutex;
+    bool alive{true};
+    bool closed{false};
+    InstallSnapshotReactor *reactor{nullptr};
+};
 
 // Reactor仅用于异步读数据
 // 需要耦合Responder、Reactor和handler handler用于执行回调 Responder用于发送响应且Responder用于上层
@@ -126,7 +134,10 @@ public:
         }
         // 流启动
         std::cout << "[start InstallSnapshotStream] peer: " << context_->peer() << std::endl;
-        std::unique_ptr<InstallSnapshotResponder> responder = std::make_unique<InstallSnapshotResponderImpl>(this);
+        state_ = std::make_shared<InstallSnapshotStreamState>();
+        state_->reactor = this;
+
+        std::unique_ptr<InstallSnapshotResponder> responder = std::make_unique<InstallSnapshotResponderImpl>(state_);
         handler_->OnInstallSnapshotStreamOn(std::move(responder), nodeId_); // Raft节点需要记录这个responder 用于后续发送响应
         // Finish(grpc::Status::OK); 没有开始读就关闭流 FIXME:
         StartRead(&pendingRequest_);
@@ -135,6 +146,13 @@ public:
     void OnDone() override
     {
         DPrintf("[InstallSnapshotStream completed]");
+        {
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            state_->alive = false;
+            state_->closed = true;
+            state_->reactor = nullptr;
+        }
+        handler_->OnInstallSnapshotStreamClose(nodeId_);
         delete this;
     }
     void OnCancel() override
@@ -142,7 +160,7 @@ public:
         if (!closed_)
         {
             closed_ = true;
-            DPrintf("[InstallSnapshotStream Canceled] peer: %s", nodeId_);
+            DPrintf("[InstallSnapshotStream Canceled] peer: %s", nodeId_.c_str());
             handler_->OnInstallSnapshotStreamClose(nodeId_);
         }
         TryFinish();
@@ -154,7 +172,10 @@ public:
         {
             if (!closed_)
             {
-                closed_ = true;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    closed_ = true;
+                }
                 handler_->OnInstallSnapshotStreamClose(nodeId_);
             }
             TryFinish();
@@ -167,31 +188,41 @@ public:
     // 给Responder的接口
     void SendReply(const RaftRpc::InstallSnapshotReply *reply)
     {
-        if (finished_ || closed_)
-            return;
-        pendingReplies_.push(*reply);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (finished_ || closed_)
+                return;
+            pendingReplies_.push(*reply);
+        }
         TrySend();
     }
     // 关闭后不能再调用SendReply
     void Close()
     {
-        if (finished_)
-            return;
-        if (!closed_)
         {
-            closed_ = true;
-            handler_->OnInstallSnapshotStreamClose(nodeId_);
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (finished_)
+                return;
+            if (!closed_)
+            {
+                closed_ = true;
+                // 关闭是由通信层关闭的 cancel、readDone、writeDone已经通知了上层 所以不需要再在通信层关闭时通知上层了
+                // handler_->OnInstallSnapshotStreamClose(nodeId_);
+            }
         }
     }
 
     // FIXME:添加writeDone
     void OnWriteDone(bool ok) override
     {
-        writing_ = false;
-        if (!ok && !closed_)
         {
-            closed_ = true;
-            handler_->OnInstallSnapshotStreamClose(nodeId_);
+            std::lock_guard<std::mutex> lock(mutex_);
+            writing_ = false;
+            if (!ok && !closed_)
+            {
+                closed_ = true;
+                handler_->OnInstallSnapshotStreamClose(nodeId_);
+            }
         }
         if (!closed_ && !finished_)
             TrySend();
@@ -202,51 +233,63 @@ public:
     class InstallSnapshotResponderImpl : public InstallSnapshotResponder
     {
     public:
-        InstallSnapshotResponderImpl(InstallSnapshotReactor *reactor)
-            : reactor_(reactor),
-              closed(false)
+        InstallSnapshotResponderImpl(std::shared_ptr<InstallSnapshotStreamState> state)
+            : state_(std::move(state))
         {
         }
         void SendReply(const RaftRpc::InstallSnapshotReply *reply) override
         {
-            reactor_->SendReply(reply);
+            {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                if (state_->closed || !state_->alive || state_->reactor == nullptr)
+                    return;
+                state_->reactor->SendReply(reply);
+            }
         }
         void Close() override
         {
-            reactor_->Close();
-            closed = true;
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            state_->closed = true;
+            state_->reactor = nullptr;
         }
 
-        bool Closed() const { return closed; }
+        bool Closed() const
+        {
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            return !state_->alive || state_->closed;
+        }
 
     private:
-        InstallSnapshotReactor *reactor_; // FIXME:不能用unique_ptr reactor由grpc管理 生命周期长于responder
-        bool closed;
-        bool finished_;
-        bool writing_;
+        // InstallSnapshotReactor *reactor_; // FIXME:不能用unique_ptr reactor由grpc管理 生命周期长于responder
+        std::shared_ptr<InstallSnapshotStreamState> state_;
     };
 
 private:
     void TryFinish()
     {
-        if (finished_ || writing_ || !closed_)
-            return;
-        finished_ = true;
+        {
+            if (finished_ || writing_ || !closed_)
+                return;
+            std::lock_guard<std::mutex> lock(mutex_);
+            finished_ = true;
+        }
         Finish(grpc::Status::OK);
     }
 
     void TrySend()
     {
-        if (finished_ || closed_ || writing_ || pendingReplies_.empty())
-            return;
-        writing_ = true;
-        pendingReply_ = std::move(pendingReplies_.front());
-        pendingReplies_.pop();
+        {
+            if (finished_ || closed_ || writing_ || pendingReplies_.empty())
+                return;
+            std::lock_guard<std::mutex> lock(mutex_);
+            writing_ = true;
+            pendingReply_ = std::move(pendingReplies_.front());
+            pendingReplies_.pop();
+        }
         StartWrite(&pendingReply_);
     }
 
     grpc::CallbackServerContext *context_;
-    // RaftRpc::InstallSnapshotArgs *pendingRequest_; 这里不应该是指针 应为对象 FIXME:
     RaftRpc::InstallSnapshotArgs pendingRequest_;
     RaftRpc::InstallSnapshotReply pendingReply_;
     RaftRpcHandler *handler_;
@@ -257,13 +300,15 @@ private:
     bool closed_;
     bool writing_;
     bool finished_; // 是否调用了Finish
+    std::mutex mutex_;
+    std::shared_ptr<InstallSnapshotStreamState> state_;
 };
 
 grpc::ServerBidiReactor<RaftRpc::InstallSnapshotArgs, RaftRpc::InstallSnapshotReply> *RaftServer::InstallSnapshot(grpc::CallbackServerContext *context)
 {
     return new InstallSnapshotReactor(context, handler_);
 }
-// 要注意区分：非正常关闭 写的时候关闭 重复关闭
+// 问题1：要注意区分：非正常关闭 写的时候关闭 重复关闭
 /*
     执行流为：
     1. 客户端发完数据，调用 WritesDone。服务端 OnReadDone(ok=false) 触发。
@@ -276,6 +321,18 @@ grpc::ServerBidiReactor<RaftRpc::InstallSnapshotArgs, RaftRpc::InstallSnapshotRe
 
     5. 此时 closed_ == true 且 writing_ == false，条件满足，执行 Finish() 安全关闭。
 */
+// 问题2：不要直接让ResponderImpl持有裸指针 容易use-after-free
+/*
+    解决办法为：添加一个中间层，用于管理安全性，并且还能解耦Reactor和Responder（这里并没有解耦 没有必要）
+*/
+class AppendEntriesReactor;
+struct AppendEntriesStreamState
+{
+    std::mutex mutex;
+    bool alive{true}; // 用来标记reactor responder不应该操作
+    bool closed{false};
+    AppendEntriesReactor *reactor{nullptr};
+};
 class AppendEntriesReactor : public grpc::ServerBidiReactor<RaftRpc::AppendEntriesArgs, RaftRpc::AppendEntriesReply>
 {
 public:
@@ -298,15 +355,25 @@ public:
         }
         // 流启动
         std::cout << "[start AppendEntriesStream] peer: " << context_->peer() << std::endl;
-        std::unique_ptr<AppendEntriesResponder> responder = std::make_unique<AppendEntriesResponderImpl>(this);
+
+        state_ = std::make_shared<AppendEntriesStreamState>();
+        state_->reactor = this;
+
+        std::unique_ptr<AppendEntriesResponder> responder = std::make_unique<AppendEntriesResponderImpl>(state_);
         handler_->OnAppendEntriesStreamOn(std::move(responder), nodeId_);
-        // Finish(grpc::Status::OK); //FIXME:
         StartRead(&pendingRequest_);
     }
 
     void OnDone() override
     {
         DPrintf("[AppendEntriesStream completed]");
+        {
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            state_->alive = false;
+            state_->closed = true;
+            state_->reactor = nullptr;
+        }
+        handler_->OnAppendEntriesStreamClose(nodeId_);
         delete this;
     }
     void OnCancel() override
@@ -314,7 +381,7 @@ public:
         // 异常关闭
         if (!closed_)
         {
-            DPrintf("[AppendEntriesStream Canceled] peer: %s", nodeId_);
+            DPrintf("[AppendEntriesStream Canceled] peer: %s", nodeId_.c_str());
             handler_->OnAppendEntriesStreamClose(nodeId_);
         }
         TryFinish();
@@ -326,7 +393,10 @@ public:
         {
             if (!closed_)
             {
-                closed_ = true;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    closed_ = true;
+                }
                 handler_->OnAppendEntriesStreamClose(nodeId_); // 通知上层
             }
             TryFinish();
@@ -338,10 +408,13 @@ public:
     }
     void SendReply(const RaftRpc::AppendEntriesReply *reply)
     {
-        // 避免已经关闭了还在写
-        if (finished_ || closed_)
-            return;
-        pendingReplies_.push(*reply);
+        {
+            // 避免已经关闭了还在写
+            if (finished_ || closed_)
+                return;
+            std::lock_guard<std::mutex> lock(mutex_);
+            pendingReplies_.push(*reply);
+        }
         TrySend();
     }
     // 关闭后不能再调用SendReply
@@ -349,22 +422,30 @@ public:
     void Close()
     {
         // 避免重复finish
-        if (finished_)
-            return;
-        if (!closed_)
         {
-            closed_ = true;
-            handler_->OnAppendEntriesStreamClose(nodeId_);
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (finished_)
+                return;
+            if (!closed_)
+            {
+
+                closed_ = true;
+                // 关闭是由通信层关闭的 cancel、readDone、writeDone已经通知了上层 所以不需要再在通信层关闭时通知上层了
+                // handler_->OnAppendEntriesStreamClose(nodeId_);
+            }
         }
     }
 
     void OnWriteDone(bool ok) override
     {
-        writing_ = false;
-        if (!ok && !closed_)
         {
-            closed_ = true;
-            handler_->OnAppendEntriesStreamClose(nodeId_);
+            std::lock_guard<std::mutex> lock(mutex_);
+            writing_ = false;
+            if (!ok && !closed_)
+            {
+                closed_ = true;
+                handler_->OnAppendEntriesStreamClose(nodeId_);
+            }
         }
         if (!finished_ && !closed_)
             TrySend();
@@ -374,57 +455,76 @@ public:
     class AppendEntriesResponderImpl : public AppendEntriesResponder
     {
     public:
-        AppendEntriesResponderImpl(AppendEntriesReactor *reactor)
-            : reactor_(reactor),
-              closed(false)
+        AppendEntriesResponderImpl(std::shared_ptr<AppendEntriesStreamState> state)
+            : state_(std::move(state))
         {
         }
         void SendReply(const RaftRpc::AppendEntriesReply *reply) override
         {
-            reactor_->SendReply(reply);
+            {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                if (!state_->alive || state_->closed || state_->reactor == nullptr)
+                    return;
+                state_->reactor->SendReply(reply);
+            }
         }
         void Close() override
         {
-            reactor_->Close();
-            closed = true;
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            state_->closed = true;
+            state_->reactor = nullptr;
         }
 
-        bool Closed() const { return closed; }
+        bool Closed() const
+        {
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            return state_->closed || !state_->alive;
+        }
 
     private:
-        AppendEntriesReactor *reactor_; // FIXME:
-        bool closed;
+        std::shared_ptr<AppendEntriesStreamState> state_; // FIXME:不能直接持有reactor指针
+        // bool closed;                                      // 状态由state管理
     };
 
 private:
     // 避免重复关闭 并且防止写的时候关闭
     void TryFinish()
     {
-        if (finished_ || writing_ || !closed_ || !pendingReplies_.empty())
-            return;
-        finished_ = true;
+        {
+            if (finished_ || writing_ || !closed_ || !pendingReplies_.empty())
+                return;
+            std::lock_guard<std::mutex> lock(mutex_);
+            finished_ = true;
+        }
         Finish(grpc::Status::OK);
     }
     void TrySend()
     {
-        if (finished_ || closed_ || writing_ || pendingReplies_.empty())
-            return;
-        writing_ = true;
-        pendingReply_ = std::move(pendingReplies_.front());
-        pendingReplies_.pop();
+        {
+            if (finished_ || closed_ || writing_ || pendingReplies_.empty())
+                return;
+            std::lock_guard<std::mutex> lock(mutex_);
+            writing_ = true;
+            pendingReply_ = std::move(pendingReplies_.front());
+            pendingReplies_.pop();
+        }
         StartWrite(&pendingReply_);
     }
 
     grpc::CallbackServerContext *context_;
-    RaftRpc::AppendEntriesArgs pendingRequest_; // FIXME:
+    RaftRpc::AppendEntriesArgs pendingRequest_;
     RaftRpc::AppendEntriesReply pendingReply_;
     RaftRpcHandler *handler_;
 
     std::queue<RaftRpc::AppendEntriesReply> pendingReplies_; // 因为是异步回复，所以存在前一个消息还没发送完毕，后一个消息就开始发了，导致grpc报错TOO_MANY_OPERATIONS
     std::string nodeId_;
+    // Reactor自身的状态
     bool closed_;
     bool writing_;
     bool finished_; // 是否已调用Finish
+    std::mutex mutex_;
+    // Responder状态
+    std::shared_ptr<AppendEntriesStreamState> state_;
 };
 
 grpc::ServerBidiReactor<RaftRpc::AppendEntriesArgs, RaftRpc::AppendEntriesReply> *RaftServer::AppendEntries(grpc::CallbackServerContext *context)
@@ -451,7 +551,7 @@ bool RaftClient::RequestVote(grpc::ClientContext *context, RaftRpc::RequestVoteA
     return true;
 }
 
-bool RaftClient::PreVote(grpc::ClientContext* context, RaftRpc::PreVoteArgs& request, RaftRpc::PreVoteReply* reply)
+bool RaftClient::PreVote(grpc::ClientContext *context, RaftRpc::PreVoteArgs &request, RaftRpc::PreVoteReply *reply)
 {
     auto status = stub_->PreVote(context, request, reply);
     if (!status.ok())

@@ -7,9 +7,12 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <optional> //c++17
 #include <unistd.h>
 
-//跳表节点
+#include "json.hpp"
+
+// 跳表节点
 template <class Key, class Value>
 class Node
 {
@@ -40,45 +43,69 @@ private:
 };
 
 template <class Key, class Value>
-class list
+class SkipList
 {
 public:
-    //maxlevel: 跳表的最大高度
-    //path:持久化路径
-    //delimiter:数据分隔符
-    list(int maxlevel, std::string path, std::string delimiter = ":");
-    ~list();
+    // maxlevel: 跳表的最大高度
+    // path:持久化路径
+    // delimiter:数据分隔符
+    SkipList(int maxlevel, std::string path, std::string delimiter = ":");
+    ~SkipList();
 
     int getRandomLevel();                          // 利用随机数生成器来设置节点的最高层级
     Node<Key, Value> *createNode(Key, Value, int); // 创建节点
-    bool insert(const Key&,const Value&);          // 插入节点
+    bool insert(const Key &, const Value &);       // 插入节点
     void display() const;                          // 输出跳表
-    bool find(const Key&) const;                          // 查找节点
-    bool erase(const Key&);                               // 删除节点
-    void clear(Node<Key, Value> *);                // 递归删除节点
-    void dump();                                   // 持久化
-    void load();                                   // 加载文件
+    std::optional<Value> get(const Key &) const;
+    bool find(const Key &) const;   // 查找节点
+    bool erase(const Key &);        // 删除节点
+    void clear(Node<Key, Value> *); // 递归删除节点
+    void dump();                    // 持久化
+    json dumpToJson();
+    void load(); // 加载文件
+    void loadFromJson(const nlohmann::json &);
 
     int size() const; // 获取跳表大小
 private:
     bool isValidString(const std::string &str);
 
-    int maxLevel_;              // 跳表的最大层级
-    int curLevel_;              // 跳表现在的最高层级
+    int maxLevel_;             // 跳表的最大层级
+    int curLevel_;             // 跳表现在的最高层级
     Node<Key, Value> *header_; // 头节点 跳表只有一个头节点
 
     // 用于持久化
     std::ifstream reader_; // 输入流
     std::ofstream writer_; // 输出流
 
-    int elementCount_; // 元素个数
-    std::string backup_; //文件输出路径
-    std::mutex mutex_; // 跳表锁
-    std::string delimiter_; //分隔符
+    int elementCount_;      // 元素个数
+    std::string backup_;    // 文件输出路径
+    std::mutex mutex_;      // 跳表锁
+    std::string delimiter_; // 分隔符
+
+    friend bool operator==(const SkipList<Key, Value> &list1, const SkipList<Key, Value> &list2)
+    {
+        bool sizeEqual = list1.size() == list2.size();
+        if (!sizeEqual)
+            return false;
+        bool eleEqual = true;
+        auto ele1 = list1.header_->forward_[0];
+        auto ele2 = list2.header_->forward_[0];
+        while (ele1 != nullptr && ele2 != nullptr)
+        {
+            if (ele1->getKey() != ele2->getKey() || ele1->getValue() != ele2->getValue())
+            {
+                eleEqual = false;
+                break;
+            }
+            ele1 = ele1->forward_[0];
+            ele2 = ele2->forward_[0];
+        }
+        return sizeEqual && eleEqual;
+    }
 };
 
 template <class Key, class Value>
-list<Key, Value>::list(int maxLevel, std::string path, std::string delimiter)
+SkipList<Key, Value>::SkipList(int maxLevel, std::string path, std::string delimiter)
     : maxLevel_(maxLevel),
       curLevel_(0),
       elementCount_(0),
@@ -91,40 +118,41 @@ list<Key, Value>::list(int maxLevel, std::string path, std::string delimiter)
 }
 
 template <class Key, class Value>
-list<Key, Value>::~list()
+SkipList<Key, Value>::~SkipList()
 {
-    if(reader_.is_open())
+    if (reader_.is_open())
         reader_.close();
-    if(writer_.is_open())
+    if (writer_.is_open())
         writer_.close();
-    //只需要删除层级为0的节点
-    if(header_->forward_[0] != nullptr)
-        clear(header_->forward_[0]); //clear为递归删除
+    // 只需要删除层级为0的节点
+    if (header_->forward_[0] != nullptr)
+        clear(header_->forward_[0]); // clear为递归删除
     delete header_;
 }
-//必须用离散概型 即掷硬币
+// 必须用离散概型 即掷硬币
 template <class Key, class Value>
-int list<Key, Value>::getRandomLevel()
+int SkipList<Key, Value>::getRandomLevel()
 {
     int counter = 0;
     // srand((unsigned)time(NULL));
-    while(rand() % 2) counter ++; //如果随机数的最低为为1 则计数器增 一旦为0则不再增加
+    while (rand() % 2)
+        counter++; // 如果随机数的最低为为1 则计数器增 一旦为0则不再增加
     counter = counter < maxLevel_ ? counter : maxLevel_;
     return counter;
 }
 
 template <class Key, class Value>
-Node<Key, Value> *list<Key, Value>::createNode(Key key, Value value, int level)
+Node<Key, Value> *SkipList<Key, Value>::createNode(Key key, Value value, int level)
 {
     return new Node<Key, Value>(key, value, level);
 }
 
 template <class Key, class Value>
-bool list<Key, Value>::insert(const Key& key, const Value& value)
+bool SkipList<Key, Value>::insert(const Key &key, const Value &value)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     Node<Key, Value> *current = this->header_; // 遍历用的指针 初始为level0的头节点
-    Node<Key, Value> *update[maxLevel_ + 1];    // 需要更新的节点的前驱
+    Node<Key, Value> *update[maxLevel_ + 1];   // 需要更新的节点的前驱
     std::fill(update, update + maxLevel_ + 1, nullptr);
 
     // 从最高层开始找 找插入节点的前驱 forward存的是节点在各个层的下一个节点！
@@ -140,7 +168,7 @@ bool list<Key, Value>::insert(const Key& key, const Value& value)
     // 如果已经有节点了
     if (current != nullptr && current->getKey() == key)
     {
-        //更新节点
+        // 更新节点
         current->setValue(value);
         return true;
     }
@@ -148,7 +176,7 @@ bool list<Key, Value>::insert(const Key& key, const Value& value)
     if (current == nullptr || current->getKey() != key)
     {
         int random = this->getRandomLevel(); // 获取随机层高
-        //如果得到的随机层高比现在的层高更大 则需要增加现在的层高
+        // 如果得到的随机层高比现在的层高更大 则需要增加现在的层高
         if (random > curLevel_)
         {
             // 高于当前层级的部分 前驱为header
@@ -173,14 +201,14 @@ bool list<Key, Value>::insert(const Key& key, const Value& value)
 }
 
 template <class Key, class Value>
-void list<Key, Value>::display() const
+void SkipList<Key, Value>::display() const
 {
-    std::cout << "\n*****list*****" << "\n";
+    std::cout << "\n*****SkipList*****" << "\n";
     for (int i = 0; i <= curLevel_; i++)
     {
-        Node<Key, Value>* node = this->header_->forward_[i];
+        Node<Key, Value> *node = this->header_->forward_[i];
         std::cout << "level " << i << " ";
-        while(node != nullptr)
+        while (node != nullptr)
         {
             std::cout << node->getKey() << ": " << node->getValue() << " ";
             node = node->forward_[i];
@@ -189,50 +217,66 @@ void list<Key, Value>::display() const
     }
 }
 
-template<class Key, class Value>
-bool list<Key, Value>::find(const Key& key) const
+template <class Key, class Value>
+std::optional<Value> SkipList<Key, Value>::get(const Key &key) const
 {
-    Node<Key, Value>* current = this->header_;
-    for(int i = curLevel_;i >= 0; i--)
+    Node<Key, Value> *current = this->header_;
+    for (int i = curLevel_; i >= 0; i--)
     {
-        while(current->forward_[i] != nullptr && current->forward_[i]->getKey() < key)
+        while (current->forward_[i] != nullptr && current->forward_[i]->getKey() < key)
             current = current->forward_[i];
     }
     current = current->forward_[0];
-    if(current != nullptr && current->getKey() == key)
+    if (current != nullptr && current->getKey() == key)
+        return current->getValue();
+    return std::nullopt;
+}
+
+template <class Key, class Value>
+bool SkipList<Key, Value>::find(const Key &key) const
+{
+    Node<Key, Value> *current = this->header_;
+    for (int i = curLevel_; i >= 0; i--)
+    {
+        while (current->forward_[i] != nullptr && current->forward_[i]->getKey() < key)
+            current = current->forward_[i];
+    }
+    current = current->forward_[0];
+    if (current != nullptr && current->getKey() == key)
         return true;
     return false;
 }
 
-template<class Key, class Value>
-bool list<Key, Value>::erase(const Key& key)
+template <class Key, class Value>
+bool SkipList<Key, Value>::erase(const Key &key)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    Node<Key, Value>* current = this->header_;
-    Node<Key, Value>* update[maxLevel_ + 1];
+    Node<Key, Value> *current = this->header_;
+    Node<Key, Value> *update[maxLevel_ + 1];
     std::fill(update, update + maxLevel_ + 1, nullptr);
 
-    for(int i = curLevel_;i >= 0;i --)
+    for (int i = curLevel_; i >= 0; i--)
     {
-        while(current->forward_[i] != nullptr && current->forward_[i]->getKey() < key)
+        while (current->forward_[i] != nullptr && current->forward_[i]->getKey() < key)
             current = current->forward_[i];
         update[i] = current;
     }
     current = current->forward_[0];
-    //找到了被删除节点
-    if(current != nullptr && current->getKey() == key)
+    // 找到了被删除节点
+    if (current != nullptr && current->getKey() == key)
     {
-        //从低到高删除该节点
-        for(int i = 0;i <= curLevel_; i++)
+        // 从低到高删除该节点
+        for (int i = 0; i <= curLevel_; i++)
         {
-            if(update[i]->forward_[i] != current)
+            if (update[i]->forward_[i] != current)
                 break;
             update[i]->forward_[i] = current->forward_[i];
         }
-        //删掉节点后可能导致高层没有节点了 删掉多余的层
-        while(curLevel_ > 0 && header_->forward_[curLevel_] == nullptr) curLevel_--;
+        // 删掉节点后可能导致高层没有节点了 删掉多余的层
+        while (curLevel_ > 0 && header_->forward_[curLevel_] == nullptr)
+            curLevel_--;
 
-        //删除完毕
+        // 删除完毕
         delete current;
         elementCount_--;
         return true;
@@ -240,21 +284,20 @@ bool list<Key, Value>::erase(const Key& key)
     return false;
 }
 
-template<class Key, class Value>
-void list<Key, Value>::clear(Node<Key, Value>* node)
+template <class Key, class Value>
+void SkipList<Key, Value>::clear(Node<Key, Value> *node)
 {
-    if(node->forward_[0] != nullptr)
+    if (node->forward_[0] != nullptr)
         clear(node->forward_[0]);
     delete node;
 }
 
-
 template <class Key, class Value>
-void list<Key, Value>::dump()
+void SkipList<Key, Value>::dump()
 {
     writer_.open(backup_);
-    Node<Key, Value>* node = this->header_->forward_[0];
-    while(node != nullptr)
+    Node<Key, Value> *node = this->header_->forward_[0];
+    while (node != nullptr)
     {
         writer_ << node->getKey() << delimiter_ << node->getValue() << "\n";
         node = node->forward_[0];
@@ -264,48 +307,92 @@ void list<Key, Value>::dump()
     std::cout << "dump complete" << std::endl;
 }
 
-template<class Key, class Value>
-bool list<Key, Value>::isValidString(const std::string &str)
+template <class Key, class Value>
+json SkipList<Key, Value>::dumpToJson()
 {
-    if(str.empty())
+    json result = json::object();
+    if (elementCount_ == 0)
+        return result;
+    else
+    {
+        Node<Key, Value> *node = header_->forward_[0];
+        while (node != nullptr)
+        {
+            result[node->getKey()] = node->getValue();
+            node = node->forward_[0];
+        }
+        return result;
+    }
+}
+
+template <class Key, class Value>
+bool SkipList<Key, Value>::isValidString(const std::string &str)
+{
+    if (str.empty())
         return false;
-    if(str.find(delimiter_) == std::string::npos)
+    if (str.find(delimiter_) == std::string::npos)
         return false;
     return true;
 }
 
 template <class Key, class Value>
-void list<Key, Value>::load()
+void SkipList<Key, Value>::load()
 {
     reader_.open(backup_, std::ios_base::in);
-    if(!reader_.is_open()) return;
+    if (!reader_.is_open())
+        return;
     std::string key_str;
     std::string value_str;
     std::string line;
-    while(getline(reader_, line))
+    while (getline(reader_, line))
     {
-        if(!isValidString(line))
+        if (!isValidString(line))
             continue;
         auto delimiter = line.find(delimiter_);
         key_str = line.substr(0, delimiter);
-        value_str = line.substr(delimiter+1, line.length()); //不包含\n 因为区间是左闭右开
-        if(key_str.empty() || value_str.empty())
+        value_str = line.substr(delimiter + 1, line.length()); // 不包含\n 因为区间是左闭右开
+        if (key_str.empty() || value_str.empty())
             continue;
-        //通过istringstream 把泛型数值转化为Key和Value
+        // 通过istringstream 把泛型数值转化为Key和Value
         std::istringstream key_ss(key_str);
         std::istringstream value_ss(value_str);
         Key key;
         Value value;
         key_ss >> key;
         value_ss >> value;
-        if(key_ss.fail() || value_ss.fail()) return;
+        if (key_ss.fail() || value_ss.fail())
+            return;
         insert(key, value);
     }
     reader_.close();
 }
 
 template <class Key, class Value>
-int list<Key, Value>::size() const
+void SkipList<Key, Value>::loadFromJson(const nlohmann::json &json)
+{
+    if (elementCount_ > 0)
+    {
+        clear(header_->forward_[0]);
+    }
+    for (const auto &entry : json.items())
+    {
+        std::istringstream key_ss(entry.key());
+        // entry.value is basic_json obj, so should cast as string
+        std::istringstream value_ss(entry.value().get<std::string>());
+        Key key;
+        Value value;
+        key_ss >> key;
+        value_ss >> value;
+        if (!insert(key, value))
+        {
+            throw std::runtime_error("something error while load json and insert");
+            break;
+        }
+    }
+}
+
+template <class Key, class Value>
+int SkipList<Key, Value>::size() const
 {
     return elementCount_;
 }

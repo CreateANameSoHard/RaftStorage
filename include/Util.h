@@ -102,6 +102,11 @@ public:
         queue_.pop();
         return v;
     }
+    bool empty() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return queue_.empty();
+    }
     // 超时弹出 即限定超时时间 如果时间过了但队列还为空 则返回false 防止因队列为空而阻塞
     bool timeoutPop(int timeout, T *res)
     {
@@ -128,6 +133,16 @@ public:
         return true;
     }
 
+    bool tryPop(T* res)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if(queue_.empty()) return false;
+        T v = queue_.front();
+        queue_.pop();
+        *res = v;
+        return true;
+    }
+
 private:
     std::mutex mutex_;
     std::queue<T> queue_;
@@ -136,7 +151,6 @@ private:
 
 using nlohmann::json;
 // KVServer传给Raft的操作 相当于上层KVServer传给下层Raft节点的日志内容
-// TODO:用json进行序列化
 class Op
 {
 public:

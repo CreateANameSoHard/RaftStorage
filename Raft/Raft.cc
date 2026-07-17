@@ -75,7 +75,6 @@ Raft::Raft(std::string ip, std::string port,
     resetElectionDeadline();
     resetHeartbeatDeadline();
     resetQuorumDeadline();
-    snapshotDeadline_ = now + std::chrono::milliseconds(SnapshotCheckInterval);
 
     threadPool_ = std::make_unique<ThreadPool>(
         std::max<std::size_t>(2, peers_.size() * 2 + 1));
@@ -158,7 +157,7 @@ void Raft::eventLoop()
             continue;
 
         // 找最小的ddl 然后阻塞到对应时间点
-        auto deadline = snapshotDeadline_;
+        auto deadline = quorumDeadline_;
         if (status_ == RaftRpc::RAFT_LEADER)
         {
             deadline = std::min(deadline, heartbeatDeadline_);
@@ -237,13 +236,6 @@ void Raft::handleDeadlines()
     {
         beginPreVote();
     }
-
-    if (now >= snapshotDeadline_)
-    {
-        maybeTakeSnapshot();
-        snapshotDeadline_ = Clock::now() +
-                            std::chrono::milliseconds(SnapshotCheckInterval);
-    }
 }
 
 void Raft::resetElectionDeadline()
@@ -262,6 +254,11 @@ void Raft::resetHeartbeatDeadline()
 void Raft::resetQuorumDeadline()
 {
     quorumDeadline_ = Clock::now() + std::chrono::milliseconds(ElectionTimeOut);
+}
+
+void Raft::resetLastLeaderContact()
+{
+    lastLeaderContact_ = Clock::now();
 }
 
 int Raft::clusterSize() const
@@ -400,10 +397,13 @@ void Raft::handlePreVote(const RaftRpc::PreVoteArgs &request,
         return;
     }
     // 节点同意preVote请求为：whetherVoteFor && 在超时时间内没有leader心跳
-    const bool leaseExpired = Clock::now() >= electionDeadline_;
+    // 但还有个冷启动的问题：假如三个节点同时启动，一个节点先超时，发prevote请求，其他节点因为没有超时而拒绝，超时节点
+    // 重置计时器。另一个节点超时，因为第一个超时节点重置了定时器，所以也会拒绝。第三个节点同上导致活锁
+    // 解决方法：添加一个lastLeaderContact，记录上次领导者通信时间点，初始化为min。冷启动时因为leaderContact为min所以不会拒绝第一次prevote
+    const bool hasRecentLeader = Clock::now() - lastLeaderContact_ < std::chrono::milliseconds(ElectionTimeOut) && lastLeaderContact_ != Clock::time_point::min();
     const bool upToDate =
         whetherVoteFor(request.lastlogindex(), request.lastlogterm());
-    const bool granted = leaseExpired && upToDate;
+    const bool granted = !hasRecentLeader && upToDate;
     reply->set_granted(granted);
     reply->set_votestate(granted ? Normal
                                  : (upToDate ? Voted : NotUpToDate));
@@ -444,7 +444,8 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
         if (status_ != RaftRpc::RAFT_FOLLOWER)
             status_ = RaftRpc::RAFT_FOLLOWER;
         resetElectionDeadline();
-        
+        resetLastLeaderContact();
+
         bool matches = request.prelogindex() >= lastIncludeSnapshotIndex_ &&
                        request.prelogindex() <= getLastLogIndex() &&
                        matchLog(request.prelogindex(), request.prelogterm());
@@ -503,6 +504,7 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
     }
 
     auto session = streamServer_.find(server);
+    // 这里一定要检查responder的有效性 因为reactor指针是由grpc管的，随时可能delete
     if (session != streamServer_.end() && session->second.AEResponder)
         session->second.AEResponder->SendReply(&reply);
 }
@@ -515,7 +517,8 @@ void Raft::OnAppendEntriesStreamClose(const std::string &peer)
         auto it = streamServer_.find(server);
         if (it != streamServer_.end() && it->second.AEResponder)
         {
-            it->second.AEResponder->Close();
+            // FIXME:这里不要再调用close了 close本来就是通信层给的通知 如果再调可能会因为grpc删掉reacter而seg fault
+            // it->second.AEResponder->Close();
             it->second.AEResponder.reset();
         } });
 }
@@ -552,6 +555,7 @@ void Raft::handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request,
     {
         status_ = RaftRpc::RAFT_FOLLOWER;
         resetElectionDeadline();
+        resetLastLeaderContact();
         if (request.lastsnapshotincludeindex() > lastIncludeSnapshotIndex_)
         {
             const int snapshotIndex = request.lastsnapshotincludeindex();
@@ -598,7 +602,8 @@ void Raft::OnInstallSnapshotStreamClose(const std::string &peer)
         auto it = streamServer_.find(server);
         if (it != streamServer_.end() && it->second.ISResponder)
         {
-            it->second.ISResponder->Close();
+            // FIXME:这里不要再调用close了 close本来就是通信层给的通知 如果再调可能会因为grpc删掉reacter而seg fault
+            // it->second.ISResponder->Close();
             it->second.ISResponder.reset();
         } });
 }
@@ -744,6 +749,8 @@ void Raft::becomeFollower(int term)
     votesGranted_ = 0;
     preVotesGranted_ = 0;
     resetElectionDeadline();
+    // 不应该在这里重置
+    // resetLastLeaderContact();
 }
 
 void Raft::stepDown()
@@ -765,6 +772,7 @@ void Raft::becomeLeader()
     status_ = RaftRpc::RAFT_LEADER;
     votesGranted_ = 0;
     preVotesGranted_ = 0;
+    DPrintf("[becomeleader] Server %d be leader", id_);
     const int next = getLastLogIndex() + 1;
     for (const auto &peer : peers_)
     {
@@ -972,27 +980,32 @@ void Raft::applyCommitted()
         msg.CommandValid_ = true;
         msg.Command_ = logs_[getSlicesIndexFromLogIndex(lastApplied_)].command();
         msg.CommandIndex_ = lastApplied_;
+        msg.CommandTerm_ = logs_[getSlicesIndexFromLogIndex(lastApplied_)].logterm();
         msg.SnapshotValid_ = false;
         applyQueue_->push(msg);
     }
 }
-
-void Raft::maybeTakeSnapshot()
+bool Raft::needSnapshot(int lastApplied)
 {
-    if (status_ != RaftRpc::RAFT_LEADER ||
-        commitIndex_ - lastIncludeSnapshotIndex_ < SnapshotThreshold ||
-        !genSnapshotCallback_)
-        return;
-
-    const int snapshotIndex = commitIndex_;
+    return query<bool>(
+        [this, lastApplied]()
+        {
+            return status_ == RaftRpc::RAFT_LEADER && commitIndex_ - lastIncludeSnapshotIndex_ >= SnapshotThreshold && lastApplied > lastIncludeSnapshotIndex_;
+        }
+    );
+}
+void Raft::snapshot(int lastApplied, const std::string& snapshot)
+{
+    const int snapshotIndex = lastApplied;
     const int snapshotTerm = getLogTermFromIndex(snapshotIndex);
-    std::string data = genSnapshotCallback_();
-    const int eraseCount = snapshotIndex - lastIncludeSnapshotIndex_;
+
+    const int eraseCount = commitIndex_ - snapshotIndex;
     logs_.erase(logs_.begin(), logs_.begin() + eraseCount);
+
     lastIncludeSnapshotIndex_ = snapshotIndex;
     lastIncludeSnapshotTerm_ = snapshotTerm;
-    lastApplied_ = std::max(lastApplied_, snapshotIndex);
-    persister_->save(persistData(), data);
+    lastApplied_ = std::max(lastIncludeSnapshotIndex_, snapshotIndex);
+    persister_->save(persistData(), snapshot);
 }
 
 bool Raft::matchLog(int logIndex, int logTerm)
@@ -1074,16 +1087,6 @@ std::vector<ApplyMsg> Raft::getApplyLogs()
         result.push_back(std::move(msg));
     }
     return result;
-}
-
-void Raft::pushMsgToKvServer(ApplyMsg msg)
-{
-    applyQueue_->push(std::move(msg));
-}
-
-int Raft::getRaftStateSize()
-{
-    return persister_->raftStateSize();
 }
 
 void Raft::readPersist(std::string value)
@@ -1208,15 +1211,4 @@ int Raft::getLastIncludeSnapshotTerm()
 {
     return query<int>([this]
                       { return lastIncludeSnapshotTerm_; });
-}
-
-void Raft::setSnapshotCallback(const std::function<std::string()> &generator)
-{
-    auto promise = std::make_shared<std::promise<void>>();
-    auto future = promise->get_future();
-    postControl([this, generator, promise]
-                {
-        genSnapshotCallback_ = generator;
-        promise->set_value(); });
-    future.get();
 }

@@ -64,7 +64,6 @@ public:
     int getRaftStateSize();
     int getSlicesIndexFromLogIndex(int logIndex);
     std::vector<ApplyMsg> getApplyLogs();
-    void pushMsgToKvServer(ApplyMsg msg);
     void readPersist(std::string value);
     std::string persistData();
 
@@ -84,13 +83,17 @@ public:
     RaftRpc::RaftState getStatus();
     bool getStop() const { return stop_.load(); }
 
+    // 生成快照的逻辑为：Raft判断是否需要生成快照，然后上层把快照数据生成后传给Raft，Raft据此丢弃日志
+    bool needSnapshot(int); // 是否需要生成快照
+    void snapshot(int lastApplied, const std::string&);
+
 
     std::shared_ptr<LockQueue<ApplyMsg>> getApplyQueue() const { return applyQueue_; }
     std::chrono::steady_clock::time_point getLastResetElectionTime();
     std::chrono::steady_clock::time_point LastResetHeartBeatTime();
     int getLastIncludeSnapshotIndex();
     int getLastIncludeSnapshotTerm();
-    void setSnapshotCallback(const std::function<std::string()> &generator);
+    // void setSnapshotCallback(const std::function<std::string()> &generator);
 
 private:
     using Event = std::function<void()>;
@@ -130,6 +133,7 @@ private:
     void markPeerActive(int server, Clock::time_point now);
     void resetQuorumDeadline();
     void resetLeaderContactTimes(Clock::time_point now);
+    void resetLastLeaderContact();
     void handleVoteReply(int server, int requestTerm, bool transportOk,
                          RaftRpc::RequestVoteReply reply);
     void handlePreVoteReply(int server, int requestTerm, int requestRound,
@@ -146,7 +150,6 @@ private:
     void handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int server);
     void handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request, int server);
     void applyCommitted();
-    void maybeTakeSnapshot();
     RaftRpc::AppendEntriesArgs buildAppendEntries(int server);
     const std::string getAddrById(int id);
 
@@ -188,7 +191,7 @@ private:
 
     std::shared_ptr<Persister> persister_;
     std::shared_ptr<LockQueue<ApplyMsg>> applyQueue_;
-    std::function<std::string()> genSnapshotCallback_;
+    
 
     int id_;
     // latest term server has seen (initialized to 0
@@ -219,7 +222,8 @@ private:
     Clock::time_point electionDeadline_;
     Clock::time_point heartbeatDeadline_;
     Clock::time_point quorumDeadline_;
-    Clock::time_point snapshotDeadline_;
+
+    Clock::time_point lastLeaderContact_{Clock::time_point::min()}; // 解决冷启动时prevote活锁的问题
 
     int lastIncludeSnapshotIndex_{0};
     int lastIncludeSnapshotTerm_{0};
