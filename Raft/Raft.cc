@@ -990,21 +990,41 @@ bool Raft::needSnapshot(int lastApplied)
     return query<bool>(
         [this, lastApplied]()
         {
-            return status_ == RaftRpc::RAFT_LEADER && commitIndex_ - lastIncludeSnapshotIndex_ >= SnapshotThreshold && lastApplied > lastIncludeSnapshotIndex_;
+            return commitIndex_ - lastIncludeSnapshotIndex_ >= SnapshotThreshold && lastApplied > lastIncludeSnapshotIndex_;
         }
     );
 }
 void Raft::snapshot(int lastApplied, const std::string& snapshot)
 {
-    const int snapshotIndex = lastApplied;
-    const int snapshotTerm = getLogTermFromIndex(snapshotIndex);
+    std::promise<void> expectedPromise;
+    auto future = expectedPromise.get_future();
+    postControl(
+        [this, lastApplied, &snapshot, &expectedPromise]()
+        {
+            doSnapshot(lastApplied, snapshot);
+            expectedPromise.set_value();
+        }
+    );
+    future.get();
+}
 
-    const int eraseCount = commitIndex_ - snapshotIndex;
+void Raft::doSnapshot(int snapshotIndex, const std::string& snapshot)
+{
+    if (snapshotIndex <= lastIncludeSnapshotIndex_)
+        return;
+
+    if (snapshotIndex > commitIndex_)
+        return;
+
+    const int snapshotTerm = getLogTermFromIndex(snapshotIndex);
+    const int eraseCount = getSlicesIndexFromLogIndex(snapshotIndex) + 1; // the element of snapshotIndex should delete
+
     logs_.erase(logs_.begin(), logs_.begin() + eraseCount);
 
     lastIncludeSnapshotIndex_ = snapshotIndex;
     lastIncludeSnapshotTerm_ = snapshotTerm;
-    lastApplied_ = std::max(lastIncludeSnapshotIndex_, snapshotIndex);
+    lastApplied_ = std::max(lastApplied_, snapshotIndex);
+
     persister_->save(persistData(), snapshot);
 }
 

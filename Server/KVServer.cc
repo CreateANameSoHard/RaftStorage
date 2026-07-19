@@ -267,7 +267,7 @@ private:
 
 void KVServer::applyWorkerLoop()
 {
-    int times = 0;
+    int appliedSinceSnapshotCheck  = 0;
     while (!stopping_)
     {
         StateTask task;
@@ -287,13 +287,9 @@ void KVServer::applyWorkerLoop()
             // 但不能直接用status判断leader然后completePending。因为状态是随时变化的
             completePending(msg, std::move(result));
             // TODO:不应该每apply一条日志就检查一次
-            if (times < 50)
+            if(msg.CommandIndex_ - appliedSinceSnapshotCheck >= 50)
             {
-                times++;
-            }
-            else
-            {
-                times = 0;
+                appliedSinceSnapshotCheck = msg.CommandIndex_;
                 maybeSnapshot(msg.CommandIndex_);
             }
         }
@@ -343,16 +339,13 @@ void KVServer::cancelPending(const RequestKey &key, std::shared_ptr<RpcCompletio
 {
     if (!completion)
         return;
+    // cancel需要注意是否有残留的pendingRequest
     {
         std::lock_guard<std::mutex> lock(pendingMutex_);
         auto it = pendingRequests_.find(key);
         if (it != pendingRequests_.end() && it->second.completion == completion)
         {
             pendingRequests_.erase(it);
-        }
-        else
-        {
-            DPrintf("[cancelPending] there is no such element");
         }
     }
     completion->cancel();

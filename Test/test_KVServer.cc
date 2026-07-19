@@ -327,7 +327,7 @@ TEST_F(KVServerTest, ManyPutTest)
     int key = 1;
     int value = 100;
 
-    int count = 500;
+    int count = 1005;
     for (int i = 0; i < count; i++)
     {
         grpc::ClientContext context1;

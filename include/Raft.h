@@ -86,6 +86,7 @@ public:
     // 生成快照的逻辑为：Raft判断是否需要生成快照，然后上层把快照数据生成后传给Raft，Raft据此丢弃日志
     bool needSnapshot(int); // 是否需要生成快照
     void snapshot(int lastApplied, const std::string&);
+    void doSnapshot(int lastApplied, const std::string&);
 
 
     std::shared_ptr<LockQueue<ApplyMsg>> getApplyQueue() const { return applyQueue_; }
