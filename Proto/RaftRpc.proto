@@ -30,6 +30,7 @@ message AppendEntriesArgs
     int32 PreLogTerm=4; //前一条日志的任期
     repeated LogEntry Entries=5; //发送的日志 如果为心跳消息，则为空
     int32 LeaderCommit=6; //领导者最新提交索引
+    optional int64 readRound = 7;
 }
 //通信响应
 message AppendEntriesReply
@@ -38,6 +39,7 @@ message AppendEntriesReply
     bool Succss=2; //跟随者是否接收成功
     int32 UpdateNextIndex=3; //根据跟随者的updateNextIndex值，领导者可以调整该跟随者的Next值
     int32 Status = 4; //跟随者状态
+    optional int64 readRound = 5;
 }
 //投票请求
 message RequestVoteArgs

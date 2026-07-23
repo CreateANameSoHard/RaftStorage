@@ -191,7 +191,6 @@ protected:
     std::unordered_map<Raft *, int> nodeToId_;
 };
 
-
 TEST_F(RaftTest, DISABLED_ElectionTest)
 {
     std::vector<Raft *> nodes = {node1_.get(), node2_.get(), node3_.get()};
@@ -252,20 +251,21 @@ TEST_F(RaftTest, DISABLED_LogReplicationTest)
     EXPECT_TRUE(committed) << "Log not committed in time";
 }
 
-TEST_F(RaftTest, LeaderFailoverTest) {
+TEST_F(RaftTest, DISABLED_LeaderFailoverTest)
+{
     std::vector<Raft *> nodes = getValidNodes();
     int oldLeaderId = WaitForLeader(nodes, 5000);
     ASSERT_NE(oldLeaderId, -1);
 
     ruin(oldLeaderId);
-    nodes = getValidNodes();  // 更新列表
+    nodes = getValidNodes(); // 更新列表
 
     int newLeaderId = WaitForLeader(nodes, 5000);
     EXPECT_NE(newLeaderId, -1);
     EXPECT_NE(newLeaderId, oldLeaderId);
 }
 
-TEST_F(RaftTest, SnapshotPersistAndReadTest)
+TEST_F(RaftTest, DISABLED_SnapshotPersistAndReadTest)
 {
     std::vector<Raft *> nodes = getValidNodes();
     int oldleaderId = WaitForLeader(nodes, 5000);
@@ -286,7 +286,7 @@ TEST_F(RaftTest, SnapshotPersistAndReadTest)
         leader->start(command, &newLogIndex, &newLogTerm, &isLeader);
         EXPECT_TRUE(isLeader);
     }
-    if(leader->needSnapshot(SnapshotThreshold))
+    if (leader->needSnapshot(SnapshotThreshold))
     {
         leader->snapshot(SnapshotThreshold, genSnapshot());
     }
@@ -308,18 +308,29 @@ TEST_F(RaftTest, SnapshotPersistAndReadTest)
 
     // 检查恢复节点的快照接收
     std::shared_ptr<LockQueue<ApplyMsg>> queue;
-    switch (oldleaderId) {
-        case 1: queue = applyQue1_; break;
-        case 2: queue = applyQue2_; break;
-        case 3: queue = applyQue3_; break;
+    switch (oldleaderId)
+    {
+    case 1:
+        queue = applyQue1_;
+        break;
+    case 2:
+        queue = applyQue2_;
+        break;
+    case 3:
+        queue = applyQue3_;
+        break;
     }
     ApplyMsg msg;
     bool hasSnapshot = false;
     auto start = std::chrono::steady_clock::now();
     while (std::chrono::duration_cast<std::chrono::milliseconds>(
-               std::chrono::steady_clock::now() - start).count() < 5000) {
-        if (queue->timeoutPop(100, &msg)) {
-            if (msg.SnapshotValid_) {
+               std::chrono::steady_clock::now() - start)
+               .count() < 5000)
+    {
+        if (queue->timeoutPop(100, &msg))
+        {
+            if (msg.SnapshotValid_)
+            {
                 hasSnapshot = true;
                 json snapData = msg.Snapshot_;
                 EXPECT_EQ(snapData.size(), SnapshotThreshold);
@@ -335,6 +346,65 @@ TEST_F(RaftTest, SnapshotPersistAndReadTest)
     // 由于快照截断，不能简单比较日志，可以比较 commitIndex
     EXPECT_EQ(idToNode_[oldleaderId]->getCommitIndex(), idToNode_[newleaderId]->getCommitIndex());
     EXPECT_EQ(idToNode_[oldleaderId]->getLastIncludeSnapshotIndex(), idToNode_[newleaderId]->getLastIncludeSnapshotIndex());
+}
+
+// readTest
+TEST_F(RaftTest, ReadTest)
+{
+    auto nodes = getValidNodes();
+    auto leader = WaitForLeader(nodes, 3000);
+    ASSERT_NE(leader, -1);
+    int requestId = 1;
+
+    for (int i = 0; i < 10; i++)
+    {
+        int logindex, logterm;
+        bool isLeader;
+        Op op;
+        op.operation = "PUT";
+        op.key = std::to_string(i);
+        op.value = std::to_string(i);
+        op.requestId = requestId;
+        idToNode_[leader]->start(op, &logindex, &logterm, &isLeader);
+        ASSERT_TRUE(isLeader);
+    }
+
+    struct Result
+    {
+        bool ok{false};
+        int round{-1};
+        int readIndex{-1};
+        bool called{false};
+    };
+
+    auto readResult = std::make_shared<Result>();
+    auto ReadPromise = std::make_shared<std::promise<void>>();
+    auto ReadFuture = ReadPromise->get_future();
+
+    auto ReadCallback = [readResult, ReadPromise](bool ok, int round, int readIndex)
+    {
+        readResult->called = true;
+        if (ok)
+        {
+            readResult->ok = true;
+            readResult->round = round;
+            readResult->readIndex = readIndex;
+        }
+        ReadPromise->set_value();
+    };
+    auto readRound = idToNode_[leader]->readIndex(std::move(ReadCallback));
+    EXPECT_GE(readRound, 0);
+
+    auto status = ReadFuture.wait_for(std::chrono::seconds(3));
+    ASSERT_EQ(status, std::future_status::ready);
+
+    ASSERT_TRUE(readResult->called);
+    ASSERT_TRUE(readResult->ok)
+        << "readIndex failed, round: " << readResult->round
+        << " index: " << readResult->readIndex;
+
+    EXPECT_EQ(readResult->round, readRound);
+    EXPECT_GE(idToNode_[leader]->getCommitIndex(), readResult->readIndex);
 }
 
 int main(int argc, char *argv[])

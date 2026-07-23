@@ -417,6 +417,7 @@ class AppendEntriesArgs final :
     kLeaderIdFieldNumber = 2,
     kPreLogIndexFieldNumber = 3,
     kPreLogTermFieldNumber = 4,
+    kReadRoundFieldNumber = 7,
     kLeaderCommitFieldNumber = 6,
   };
   // repeated .RaftRpc.LogEntry Entries = 5;
@@ -473,6 +474,19 @@ class AppendEntriesArgs final :
   void _internal_set_prelogterm(int32_t value);
   public:
 
+  // optional int64 readRound = 7;
+  bool has_readround() const;
+  private:
+  bool _internal_has_readround() const;
+  public:
+  void clear_readround();
+  int64_t readround() const;
+  void set_readround(int64_t value);
+  private:
+  int64_t _internal_readround() const;
+  void _internal_set_readround(int64_t value);
+  public:
+
   // int32 LeaderCommit = 6;
   void clear_leadercommit();
   int32_t leadercommit() const;
@@ -490,13 +504,15 @@ class AppendEntriesArgs final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::RaftRpc::LogEntry > entries_;
     int32_t term_;
     int32_t leaderid_;
     int32_t prelogindex_;
     int32_t prelogterm_;
+    int64_t readround_;
     int32_t leadercommit_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_RaftRpc_2eproto;
@@ -628,6 +644,7 @@ class AppendEntriesReply final :
     kSuccssFieldNumber = 2,
     kUpdateNextIndexFieldNumber = 3,
     kStatusFieldNumber = 4,
+    kReadRoundFieldNumber = 5,
   };
   // int32 Term = 1;
   void clear_term();
@@ -665,6 +682,19 @@ class AppendEntriesReply final :
   void _internal_set_status(int32_t value);
   public:
 
+  // optional int64 readRound = 5;
+  bool has_readround() const;
+  private:
+  bool _internal_has_readround() const;
+  public:
+  void clear_readround();
+  int64_t readround() const;
+  void set_readround(int64_t value);
+  private:
+  int64_t _internal_readround() const;
+  void _internal_set_readround(int64_t value);
+  public:
+
   // @@protoc_insertion_point(class_scope:RaftRpc.AppendEntriesReply)
  private:
   class _Internal;
@@ -673,11 +703,13 @@ class AppendEntriesReply final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     int32_t term_;
     bool succss_;
     int32_t updatenextindex_;
     int32_t status_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+    int64_t readround_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_RaftRpc_2eproto;
@@ -1985,6 +2017,34 @@ inline void AppendEntriesArgs::set_leadercommit(int32_t value) {
   // @@protoc_insertion_point(field_set:RaftRpc.AppendEntriesArgs.LeaderCommit)
 }
 
+// optional int64 readRound = 7;
+inline bool AppendEntriesArgs::_internal_has_readround() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
+  return value;
+}
+inline bool AppendEntriesArgs::has_readround() const {
+  return _internal_has_readround();
+}
+inline void AppendEntriesArgs::clear_readround() {
+  _impl_.readround_ = int64_t{0};
+  _impl_._has_bits_[0] &= ~0x00000001u;
+}
+inline int64_t AppendEntriesArgs::_internal_readround() const {
+  return _impl_.readround_;
+}
+inline int64_t AppendEntriesArgs::readround() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.AppendEntriesArgs.readRound)
+  return _internal_readround();
+}
+inline void AppendEntriesArgs::_internal_set_readround(int64_t value) {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  _impl_.readround_ = value;
+}
+inline void AppendEntriesArgs::set_readround(int64_t value) {
+  _internal_set_readround(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.AppendEntriesArgs.readRound)
+}
+
 // -------------------------------------------------------------------
 
 // AppendEntriesReply
@@ -2067,6 +2127,34 @@ inline void AppendEntriesReply::_internal_set_status(int32_t value) {
 inline void AppendEntriesReply::set_status(int32_t value) {
   _internal_set_status(value);
   // @@protoc_insertion_point(field_set:RaftRpc.AppendEntriesReply.Status)
+}
+
+// optional int64 readRound = 5;
+inline bool AppendEntriesReply::_internal_has_readround() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
+  return value;
+}
+inline bool AppendEntriesReply::has_readround() const {
+  return _internal_has_readround();
+}
+inline void AppendEntriesReply::clear_readround() {
+  _impl_.readround_ = int64_t{0};
+  _impl_._has_bits_[0] &= ~0x00000001u;
+}
+inline int64_t AppendEntriesReply::_internal_readround() const {
+  return _impl_.readround_;
+}
+inline int64_t AppendEntriesReply::readround() const {
+  // @@protoc_insertion_point(field_get:RaftRpc.AppendEntriesReply.readRound)
+  return _internal_readround();
+}
+inline void AppendEntriesReply::_internal_set_readround(int64_t value) {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  _impl_.readround_ = value;
+}
+inline void AppendEntriesReply::set_readround(int64_t value) {
+  _internal_set_readround(value);
+  // @@protoc_insertion_point(field_set:RaftRpc.AppendEntriesReply.readRound)
 }
 
 // -------------------------------------------------------------------

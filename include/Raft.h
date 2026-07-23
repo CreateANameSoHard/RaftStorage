@@ -33,6 +33,7 @@ public:
     Raft &operator=(const Raft &) = delete;
 
     void start(Op command, int *newLogIndex, int *newLogTerm, bool *isLeader);
+    int readIndex(const std::function<void(bool, int, int)> &cb); // success round readIndex
 
     void OnRequestVote(const RaftRpc::RequestVoteArgs *request,
                        RaftRpc::RequestVoteReply *reply) override;
@@ -48,7 +49,6 @@ public:
     void OnInstallSnapshotChunk(const RaftRpc::InstallSnapshotArgs *request,
                                 const std::string &peer) override;
     void OnInstallSnapshotStreamClose(const std::string &peer) override;
-
 
     void updateCommitIndex();
     bool matchLog(int logIndex, int logTerm);
@@ -85,9 +85,8 @@ public:
 
     // 生成快照的逻辑为：Raft判断是否需要生成快照，然后上层把快照数据生成后传给Raft，Raft据此丢弃日志
     bool needSnapshot(int); // 是否需要生成快照
-    void snapshot(int lastApplied, const std::string&);
-    void doSnapshot(int lastApplied, const std::string&);
-
+    void snapshot(int lastApplied, const std::string &);
+    void doSnapshot(int lastApplied, const std::string &);
 
     std::shared_ptr<LockQueue<ApplyMsg>> getApplyQueue() const { return applyQueue_; }
     std::chrono::steady_clock::time_point getLastResetElectionTime();
@@ -111,6 +110,14 @@ private:
         std::unique_ptr<AppendEntriesResponder> AEResponder;
         std::unique_ptr<InstallSnapshotResponder> ISResponder;
     };
+    struct pendingReadIndex
+    {
+        uint64_t round; // identify Read round
+        int term;
+        int readIndex;
+        std::unordered_set<int> acks;                               // quorum acks
+        std::vector<std::function<void(bool, int, int)>> callbacks; // notification
+    };
 
     void postControl(Event event);
     void postCommand(Event event);
@@ -125,8 +132,12 @@ private:
     void becomeLeader();
     void stepDown();
     void scheduleAllReplication();
+    void scheduleAllHeartBeat(uint64_t round);
     void scheduleReplication(int server);
+    void scheduleHeartBeat(int server, uint64_t round);
+    void trySchedulePendingReadHeartBeat(int server);
     void launchAppendEntries(int server, RaftRpc::AppendEntriesArgs request);
+    void launchReadHeartBeat(int server, RaftRpc::AppendEntriesArgs request);
     void launchSnapshot(int server, RaftRpc::InstallSnapshotArgs request);
     int clusterSize() const;
     int quorumSize() const;
@@ -149,10 +160,23 @@ private:
     void handlePreVote(const RaftRpc::PreVoteArgs &request,
                        RaftRpc::PreVoteReply *reply);
     void handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int server);
+    void handleReadHeartBeat(const RaftRpc::AppendEntriesArgs &request, int server);
     void handleInstallSnapshot(const RaftRpc::InstallSnapshotArgs &request, int server);
     void applyCommitted();
     RaftRpc::AppendEntriesArgs buildAppendEntries(int server);
+    RaftRpc::AppendEntriesArgs buildReadHeartBeat(int server, uint64_t round);
     const std::string getAddrById(int id);
+
+    // for append no-op command
+    RaftRpc::LogEntry buildNoopCommand();
+
+    // for readIndex
+    void appendNoopCommandInEventLoop();
+    void failAllPendingReadIndexInEventLoop();
+    void completeActiveReadInEventLoop();
+
+    static uint64_t readIndexRound;
+    static uint64_t readIndexRoundGenerator();
 
     template <typename T>
     T query(std::function<T()> reader)
@@ -161,9 +185,8 @@ private:
             return reader();
         auto promise = std::make_shared<std::promise<T>>();
         auto future = promise->get_future();
-        postControl([promise, reader = std::move(reader)]() mutable {
-            promise->set_value(reader());
-        });
+        postControl([promise, reader = std::move(reader)]() mutable
+                    { promise->set_value(reader()); });
         return future.get();
     }
 
@@ -192,7 +215,6 @@ private:
 
     std::shared_ptr<Persister> persister_;
     std::shared_ptr<LockQueue<ApplyMsg>> applyQueue_;
-    
 
     int id_;
     // latest term server has seen (initialized to 0
@@ -206,9 +228,12 @@ private:
     // only for leader
     std::unordered_map<int, int> nextIndex_;
     std::unordered_map<int, int> matchIndex_;
+    bool currentTermCommitted_{false}; // for no-op
 
-    std::unordered_map<int, bool> replicationInFlight_;
-    std::unordered_map<int, bool> replicationPending_;
+    std::optional<pendingReadIndex> activeRead_; // 一次只能有一个read active
+    std::unordered_map<int, uint64_t> readIndexPending_;
+    std::unordered_map<int, bool> replicationInFlight_; // 节点是否与其他节点正在通信
+    std::unordered_map<int, bool> replicationPending_;  // 是否有任务等待
     RaftRpc::RaftState status_{RaftRpc::RAFT_FOLLOWER};
     int votesGranted_{0};
     int electionTerm_{0};

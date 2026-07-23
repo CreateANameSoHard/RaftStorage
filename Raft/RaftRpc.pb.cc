@@ -38,13 +38,15 @@ struct LogEntryDefaultTypeInternal {
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 LogEntryDefaultTypeInternal _LogEntry_default_instance_;
 PROTOBUF_CONSTEXPR AppendEntriesArgs::AppendEntriesArgs(
     ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.entries_)*/{}
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.entries_)*/{}
   , /*decltype(_impl_.term_)*/0
   , /*decltype(_impl_.leaderid_)*/0
   , /*decltype(_impl_.prelogindex_)*/0
   , /*decltype(_impl_.prelogterm_)*/0
-  , /*decltype(_impl_.leadercommit_)*/0
-  , /*decltype(_impl_._cached_size_)*/{}} {}
+  , /*decltype(_impl_.readround_)*/int64_t{0}
+  , /*decltype(_impl_.leadercommit_)*/0} {}
 struct AppendEntriesArgsDefaultTypeInternal {
   PROTOBUF_CONSTEXPR AppendEntriesArgsDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -56,11 +58,13 @@ struct AppendEntriesArgsDefaultTypeInternal {
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 AppendEntriesArgsDefaultTypeInternal _AppendEntriesArgs_default_instance_;
 PROTOBUF_CONSTEXPR AppendEntriesReply::AppendEntriesReply(
     ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.term_)*/0
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.term_)*/0
   , /*decltype(_impl_.succss_)*/false
   , /*decltype(_impl_.updatenextindex_)*/0
   , /*decltype(_impl_.status_)*/0
-  , /*decltype(_impl_._cached_size_)*/{}} {}
+  , /*decltype(_impl_.readround_)*/int64_t{0}} {}
 struct AppendEntriesReplyDefaultTypeInternal {
   PROTOBUF_CONSTEXPR AppendEntriesReplyDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -178,7 +182,7 @@ const uint32_t TableStruct_RaftRpc_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(
   PROTOBUF_FIELD_OFFSET(::RaftRpc::LogEntry, _impl_.command_),
   PROTOBUF_FIELD_OFFSET(::RaftRpc::LogEntry, _impl_.logterm_),
   PROTOBUF_FIELD_OFFSET(::RaftRpc::LogEntry, _impl_.logindex_),
-  ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesArgs, _impl_._has_bits_),
   PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesArgs, _internal_metadata_),
   ~0u,  // no _extensions_
   ~0u,  // no _oneof_case_
@@ -190,7 +194,15 @@ const uint32_t TableStruct_RaftRpc_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(
   PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesArgs, _impl_.prelogterm_),
   PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesArgs, _impl_.entries_),
   PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesArgs, _impl_.leadercommit_),
-  ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesArgs, _impl_.readround_),
+  ~0u,
+  ~0u,
+  ~0u,
+  ~0u,
+  ~0u,
+  ~0u,
+  0,
+  PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesReply, _impl_._has_bits_),
   PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesReply, _internal_metadata_),
   ~0u,  // no _extensions_
   ~0u,  // no _oneof_case_
@@ -200,6 +212,12 @@ const uint32_t TableStruct_RaftRpc_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(
   PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesReply, _impl_.succss_),
   PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesReply, _impl_.updatenextindex_),
   PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesReply, _impl_.status_),
+  PROTOBUF_FIELD_OFFSET(::RaftRpc::AppendEntriesReply, _impl_.readround_),
+  ~0u,
+  ~0u,
+  ~0u,
+  ~0u,
+  0,
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::RaftRpc::RequestVoteArgs, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -260,14 +278,14 @@ const uint32_t TableStruct_RaftRpc_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(
 };
 static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, -1, sizeof(::RaftRpc::LogEntry)},
-  { 9, -1, -1, sizeof(::RaftRpc::AppendEntriesArgs)},
-  { 21, -1, -1, sizeof(::RaftRpc::AppendEntriesReply)},
-  { 31, -1, -1, sizeof(::RaftRpc::RequestVoteArgs)},
-  { 41, -1, -1, sizeof(::RaftRpc::RequestVoteReply)},
-  { 50, -1, -1, sizeof(::RaftRpc::PreVoteArgs)},
-  { 60, -1, -1, sizeof(::RaftRpc::PreVoteReply)},
-  { 69, -1, -1, sizeof(::RaftRpc::InstallSnapshotArgs)},
-  { 81, -1, -1, sizeof(::RaftRpc::InstallSnapshotReply)},
+  { 9, 22, -1, sizeof(::RaftRpc::AppendEntriesArgs)},
+  { 29, 40, -1, sizeof(::RaftRpc::AppendEntriesReply)},
+  { 45, -1, -1, sizeof(::RaftRpc::RequestVoteArgs)},
+  { 55, -1, -1, sizeof(::RaftRpc::RequestVoteReply)},
+  { 64, -1, -1, sizeof(::RaftRpc::PreVoteArgs)},
+  { 74, -1, -1, sizeof(::RaftRpc::PreVoteReply)},
+  { 83, -1, -1, sizeof(::RaftRpc::InstallSnapshotArgs)},
+  { 95, -1, -1, sizeof(::RaftRpc::InstallSnapshotReply)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -285,40 +303,42 @@ static const ::_pb::Message* const file_default_instances[] = {
 const char descriptor_table_protodef_RaftRpc_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\rRaftRpc.proto\022\007RaftRpc\">\n\010LogEntry\022\017\n\007"
   "Command\030\001 \001(\014\022\017\n\007LogTerm\030\002 \001(\005\022\020\n\010LogInd"
-  "ex\030\003 \001(\005\"\226\001\n\021AppendEntriesArgs\022\014\n\004Term\030\001"
+  "ex\030\003 \001(\005\"\274\001\n\021AppendEntriesArgs\022\014\n\004Term\030\001"
   " \001(\005\022\020\n\010LeaderId\030\002 \001(\005\022\023\n\013PreLogIndex\030\003 "
   "\001(\005\022\022\n\nPreLogTerm\030\004 \001(\005\022\"\n\007Entries\030\005 \003(\013"
   "2\021.RaftRpc.LogEntry\022\024\n\014LeaderCommit\030\006 \001("
-  "\005\"[\n\022AppendEntriesReply\022\014\n\004Term\030\001 \001(\005\022\016\n"
-  "\006Succss\030\002 \001(\010\022\027\n\017UpdateNextIndex\030\003 \001(\005\022\016"
-  "\n\006Status\030\004 \001(\005\"_\n\017RequestVoteArgs\022\014\n\004Ter"
-  "m\030\001 \001(\005\022\023\n\013CandidateId\030\002 \001(\005\022\023\n\013LastLogT"
-  "erm\030\003 \001(\005\022\024\n\014LastLogIndex\030\004 \001(\005\"H\n\020Reque"
-  "stVoteReply\022\014\n\004Term\030\001 \001(\005\022\023\n\013VoteGranted"
-  "\030\002 \001(\010\022\021\n\tVoteState\030\003 \001(\005\"[\n\013PreVoteArgs"
-  "\022\014\n\004Term\030\001 \001(\005\022\023\n\013CandidateId\030\002 \001(\005\022\023\n\013L"
-  "astLogTerm\030\003 \001(\005\022\024\n\014LastLogIndex\030\004 \001(\005\"@"
-  "\n\014PreVoteReply\022\014\n\004Term\030\001 \001(\005\022\017\n\007Granted\030"
-  "\002 \001(\010\022\021\n\tVoteState\030\003 \001(\005\"\226\001\n\023InstallSnap"
-  "shotArgs\022\020\n\010LeaderId\030\001 \001(\005\022\014\n\004Term\030\002 \001(\005"
-  "\022 \n\030LastSnapShotIncludeIndex\030\003 \001(\005\022\037\n\027La"
-  "stSnapShotIncludeTerm\030\004 \001(\005\022\014\n\004Data\030\005 \001("
-  "\014\022\016\n\006Offset\030\006 \001(\005\"$\n\024InstallSnapshotRepl"
-  "y\022\014\n\004Term\030\001 \001(\005*Z\n\tRaftState\022\021\n\rRAFT_FOL"
-  "LOWER\020\000\022\022\n\016RAFT_CANDIDATE\020\001\022\017\n\013RAFT_LEAD"
-  "ER\020\002\022\025\n\021RAFT_PRECANDIDATE\020\0032\247\002\n\007RaftRpc\022"
-  "B\n\013RequestVote\022\030.RaftRpc.RequestVoteArgs"
-  "\032\031.RaftRpc.RequestVoteReply\0226\n\007PreVote\022\024"
-  ".RaftRpc.PreVoteArgs\032\025.RaftRpc.PreVoteRe"
-  "ply\022L\n\rAppendEntries\022\032.RaftRpc.AppendEnt"
-  "riesArgs\032\033.RaftRpc.AppendEntriesReply(\0010"
-  "\001\022R\n\017InstallSnapshot\022\034.RaftRpc.InstallSn"
-  "apshotArgs\032\035.RaftRpc.InstallSnapshotRepl"
-  "y(\0010\001b\006proto3"
+  "\005\022\026\n\treadRound\030\007 \001(\003H\000\210\001\001B\014\n\n_readRound\""
+  "\201\001\n\022AppendEntriesReply\022\014\n\004Term\030\001 \001(\005\022\016\n\006"
+  "Succss\030\002 \001(\010\022\027\n\017UpdateNextIndex\030\003 \001(\005\022\016\n"
+  "\006Status\030\004 \001(\005\022\026\n\treadRound\030\005 \001(\003H\000\210\001\001B\014\n"
+  "\n_readRound\"_\n\017RequestVoteArgs\022\014\n\004Term\030\001"
+  " \001(\005\022\023\n\013CandidateId\030\002 \001(\005\022\023\n\013LastLogTerm"
+  "\030\003 \001(\005\022\024\n\014LastLogIndex\030\004 \001(\005\"H\n\020RequestV"
+  "oteReply\022\014\n\004Term\030\001 \001(\005\022\023\n\013VoteGranted\030\002 "
+  "\001(\010\022\021\n\tVoteState\030\003 \001(\005\"[\n\013PreVoteArgs\022\014\n"
+  "\004Term\030\001 \001(\005\022\023\n\013CandidateId\030\002 \001(\005\022\023\n\013Last"
+  "LogTerm\030\003 \001(\005\022\024\n\014LastLogIndex\030\004 \001(\005\"@\n\014P"
+  "reVoteReply\022\014\n\004Term\030\001 \001(\005\022\017\n\007Granted\030\002 \001"
+  "(\010\022\021\n\tVoteState\030\003 \001(\005\"\226\001\n\023InstallSnapsho"
+  "tArgs\022\020\n\010LeaderId\030\001 \001(\005\022\014\n\004Term\030\002 \001(\005\022 \n"
+  "\030LastSnapShotIncludeIndex\030\003 \001(\005\022\037\n\027LastS"
+  "napShotIncludeTerm\030\004 \001(\005\022\014\n\004Data\030\005 \001(\014\022\016"
+  "\n\006Offset\030\006 \001(\005\"$\n\024InstallSnapshotReply\022\014"
+  "\n\004Term\030\001 \001(\005*Z\n\tRaftState\022\021\n\rRAFT_FOLLOW"
+  "ER\020\000\022\022\n\016RAFT_CANDIDATE\020\001\022\017\n\013RAFT_LEADER\020"
+  "\002\022\025\n\021RAFT_PRECANDIDATE\020\0032\247\002\n\007RaftRpc\022B\n\013"
+  "RequestVote\022\030.RaftRpc.RequestVoteArgs\032\031."
+  "RaftRpc.RequestVoteReply\0226\n\007PreVote\022\024.Ra"
+  "ftRpc.PreVoteArgs\032\025.RaftRpc.PreVoteReply"
+  "\022L\n\rAppendEntries\022\032.RaftRpc.AppendEntrie"
+  "sArgs\032\033.RaftRpc.AppendEntriesReply(\0010\001\022R"
+  "\n\017InstallSnapshot\022\034.RaftRpc.InstallSnaps"
+  "hotArgs\032\035.RaftRpc.InstallSnapshotReply(\001"
+  "0\001b\006proto3"
   ;
 static ::_pbi::once_flag descriptor_table_RaftRpc_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_RaftRpc_2eproto = {
-    false, false, 1253, descriptor_table_protodef_RaftRpc_2eproto,
+    false, false, 1330, descriptor_table_protodef_RaftRpc_2eproto,
     "RaftRpc.proto",
     &descriptor_table_RaftRpc_2eproto_once, nullptr, 0, 9,
     schemas, file_default_instances, TableStruct_RaftRpc_2eproto::offsets,
@@ -611,6 +631,10 @@ void LogEntry::InternalSwap(LogEntry* other) {
 
 class AppendEntriesArgs::_Internal {
  public:
+  using HasBits = decltype(std::declval<AppendEntriesArgs>()._impl_._has_bits_);
+  static void set_has_readround(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
 };
 
 AppendEntriesArgs::AppendEntriesArgs(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -623,13 +647,15 @@ AppendEntriesArgs::AppendEntriesArgs(const AppendEntriesArgs& from)
   : ::PROTOBUF_NAMESPACE_ID::Message() {
   AppendEntriesArgs* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.entries_){from._impl_.entries_}
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.entries_){from._impl_.entries_}
     , decltype(_impl_.term_){}
     , decltype(_impl_.leaderid_){}
     , decltype(_impl_.prelogindex_){}
     , decltype(_impl_.prelogterm_){}
-    , decltype(_impl_.leadercommit_){}
-    , /*decltype(_impl_._cached_size_)*/{}};
+    , decltype(_impl_.readround_){}
+    , decltype(_impl_.leadercommit_){}};
 
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
   ::memcpy(&_impl_.term_, &from._impl_.term_,
@@ -643,13 +669,15 @@ inline void AppendEntriesArgs::SharedCtor(
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.entries_){arena}
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.entries_){arena}
     , decltype(_impl_.term_){0}
     , decltype(_impl_.leaderid_){0}
     , decltype(_impl_.prelogindex_){0}
     , decltype(_impl_.prelogterm_){0}
+    , decltype(_impl_.readround_){int64_t{0}}
     , decltype(_impl_.leadercommit_){0}
-    , /*decltype(_impl_._cached_size_)*/{}
   };
 }
 
@@ -679,13 +707,17 @@ void AppendEntriesArgs::Clear() {
 
   _impl_.entries_.Clear();
   ::memset(&_impl_.term_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.leadercommit_) -
-      reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.leadercommit_));
+      reinterpret_cast<char*>(&_impl_.prelogterm_) -
+      reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.prelogterm_));
+  _impl_.readround_ = int64_t{0};
+  _impl_.leadercommit_ = 0;
+  _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
 
 const char* AppendEntriesArgs::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
 #define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
   while (!ctx->Done(&ptr)) {
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
@@ -743,6 +775,15 @@ const char* AppendEntriesArgs::_InternalParse(const char* ptr, ::_pbi::ParseCont
         } else
           goto handle_unusual;
         continue;
+      // optional int64 readRound = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _Internal::set_has_readround(&has_bits);
+          _impl_.readround_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -759,6 +800,7 @@ const char* AppendEntriesArgs::_InternalParse(const char* ptr, ::_pbi::ParseCont
     CHK_(ptr != nullptr);
   }  // while
 message_done:
+  _impl_._has_bits_.Or(has_bits);
   return ptr;
 failure:
   ptr = nullptr;
@@ -810,6 +852,12 @@ uint8_t* AppendEntriesArgs::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteInt32ToArray(6, this->_internal_leadercommit(), target);
   }
 
+  // optional int64 readRound = 7;
+  if (_internal_has_readround()) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt64ToArray(7, this->_internal_readround(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -853,6 +901,12 @@ size_t AppendEntriesArgs::ByteSizeLong() const {
     total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_prelogterm());
   }
 
+  // optional int64 readRound = 7;
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_readround());
+  }
+
   // int32 LeaderCommit = 6;
   if (this->_internal_leadercommit() != 0) {
     total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_leadercommit());
@@ -889,6 +943,9 @@ void AppendEntriesArgs::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, cons
   if (from._internal_prelogterm() != 0) {
     _this->_internal_set_prelogterm(from._internal_prelogterm());
   }
+  if (from._internal_has_readround()) {
+    _this->_internal_set_readround(from._internal_readround());
+  }
   if (from._internal_leadercommit() != 0) {
     _this->_internal_set_leadercommit(from._internal_leadercommit());
   }
@@ -909,6 +966,7 @@ bool AppendEntriesArgs::IsInitialized() const {
 void AppendEntriesArgs::InternalSwap(AppendEntriesArgs* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   _impl_.entries_.InternalSwap(&other->_impl_.entries_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(AppendEntriesArgs, _impl_.leadercommit_)
@@ -928,6 +986,10 @@ void AppendEntriesArgs::InternalSwap(AppendEntriesArgs* other) {
 
 class AppendEntriesReply::_Internal {
  public:
+  using HasBits = decltype(std::declval<AppendEntriesReply>()._impl_._has_bits_);
+  static void set_has_readround(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
 };
 
 AppendEntriesReply::AppendEntriesReply(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -940,16 +1002,18 @@ AppendEntriesReply::AppendEntriesReply(const AppendEntriesReply& from)
   : ::PROTOBUF_NAMESPACE_ID::Message() {
   AppendEntriesReply* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.term_){}
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.term_){}
     , decltype(_impl_.succss_){}
     , decltype(_impl_.updatenextindex_){}
     , decltype(_impl_.status_){}
-    , /*decltype(_impl_._cached_size_)*/{}};
+    , decltype(_impl_.readround_){}};
 
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
   ::memcpy(&_impl_.term_, &from._impl_.term_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.status_) -
-    reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.status_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.readround_) -
+    reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.readround_));
   // @@protoc_insertion_point(copy_constructor:RaftRpc.AppendEntriesReply)
 }
 
@@ -958,11 +1022,13 @@ inline void AppendEntriesReply::SharedCtor(
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.term_){0}
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.term_){0}
     , decltype(_impl_.succss_){false}
     , decltype(_impl_.updatenextindex_){0}
     , decltype(_impl_.status_){0}
-    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.readround_){int64_t{0}}
   };
 }
 
@@ -992,11 +1058,14 @@ void AppendEntriesReply::Clear() {
   ::memset(&_impl_.term_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&_impl_.status_) -
       reinterpret_cast<char*>(&_impl_.term_)) + sizeof(_impl_.status_));
+  _impl_.readround_ = int64_t{0};
+  _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
 
 const char* AppendEntriesReply::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
 #define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
   while (!ctx->Done(&ptr)) {
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
@@ -1033,6 +1102,15 @@ const char* AppendEntriesReply::_InternalParse(const char* ptr, ::_pbi::ParseCon
         } else
           goto handle_unusual;
         continue;
+      // optional int64 readRound = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _Internal::set_has_readround(&has_bits);
+          _impl_.readround_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -1049,6 +1127,7 @@ const char* AppendEntriesReply::_InternalParse(const char* ptr, ::_pbi::ParseCon
     CHK_(ptr != nullptr);
   }  // while
 message_done:
+  _impl_._has_bits_.Or(has_bits);
   return ptr;
 failure:
   ptr = nullptr;
@@ -1084,6 +1163,12 @@ uint8_t* AppendEntriesReply::_InternalSerialize(
   if (this->_internal_status() != 0) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteInt32ToArray(4, this->_internal_status(), target);
+  }
+
+  // optional int64 readRound = 5;
+  if (_internal_has_readround()) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt64ToArray(5, this->_internal_readround(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -1122,6 +1207,12 @@ size_t AppendEntriesReply::ByteSizeLong() const {
     total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_status());
   }
 
+  // optional int64 readRound = 5;
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_readround());
+  }
+
   return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
 }
 
@@ -1152,6 +1243,9 @@ void AppendEntriesReply::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, con
   if (from._internal_status() != 0) {
     _this->_internal_set_status(from._internal_status());
   }
+  if (from._internal_has_readround()) {
+    _this->_internal_set_readround(from._internal_readround());
+  }
   _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
 }
 
@@ -1169,9 +1263,10 @@ bool AppendEntriesReply::IsInitialized() const {
 void AppendEntriesReply::InternalSwap(AppendEntriesReply* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(AppendEntriesReply, _impl_.status_)
-      + sizeof(AppendEntriesReply::_impl_.status_)
+      PROTOBUF_FIELD_OFFSET(AppendEntriesReply, _impl_.readround_)
+      + sizeof(AppendEntriesReply::_impl_.readround_)
       - PROTOBUF_FIELD_OFFSET(AppendEntriesReply, _impl_.term_)>(
           reinterpret_cast<char*>(&_impl_.term_),
           reinterpret_cast<char*>(&other->_impl_.term_));

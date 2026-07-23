@@ -29,6 +29,11 @@ namespace
     constexpr std::size_t ControlBatchSize = 128;
     constexpr std::size_t CommandBatchSize = 32;
 }
+uint64_t Raft::readIndexRound = 0;
+uint64_t Raft::readIndexRoundGenerator()
+{
+    return ++readIndexRound;
+}
 
 Raft::Raft(std::string ip, std::string port,
            std::unordered_map<int, const std::string> idToAddr, int id,
@@ -103,6 +108,7 @@ Raft::~Raft()
         server_.reset();
     }
 
+    failAllPendingReadIndexInEventLoop();
     if (threadPool_)
         threadPool_->stop();
 
@@ -323,6 +329,49 @@ void Raft::start(Op command, int *newLogIndex, int *newLogTerm, bool *isLeader)
     *newLogTerm = result.term;
     *isLeader = result.leader;
 }
+// NOTE:callback should not block the eventloop
+int Raft::readIndex(const std::function<void(bool, int, int)> &cb)
+{
+    std::promise<int> expectedPromise;
+    auto expectedFuture = expectedPromise.get_future();
+    postControl(
+        [this, callback = std::move(cb), &expectedPromise]()
+        {
+            if (status_ != RaftRpc::RAFT_LEADER)
+            {
+                callback(false, -1, -1);
+                expectedPromise.set_value(-1);
+                return;
+            }
+            // TODO:block?
+            if (!currentTermCommitted_)
+            {
+                callback(false, -2, -2);
+                expectedPromise.set_value(-2);
+                return;
+            }
+            // same round
+            if (activeRead_.has_value())
+            {
+                activeRead_->callbacks.push_back(std::move(callback));
+                expectedPromise.set_value(activeRead_->round);
+                return;
+            }
+
+            pendingReadIndex round;
+            round.round = readIndexRoundGenerator();
+            round.term = currentTerm_;
+            round.readIndex = commitIndex_;
+            round.acks.insert(id_);
+            round.callbacks.push_back(std::move(callback));
+
+            activeRead_ = std::move(round);
+
+            scheduleAllHeartBeat(activeRead_->round);
+            expectedPromise.set_value(activeRead_->round);
+        });
+    return expectedFuture.get();
+}
 
 void Raft::OnRequestVote(const RaftRpc::RequestVoteArgs *request,
                          RaftRpc::RequestVoteReply *reply)
@@ -422,8 +471,12 @@ void Raft::OnAppendEntries(const RaftRpc::AppendEntriesArgs *request,
 {
     RaftRpc::AppendEntriesArgs copy = *request;
     const int server = std::stoi(peer);
-    postControl([this, copy = std::move(copy), server]
-                { handleAppendEntries(copy, server); });
+    if (request->has_readround() && request->entries_size() == 0)
+        postControl([this, copy = std::move(copy), server]
+                    { handleReadHeartBeat(copy, server); });
+    else
+        postControl([this, copy = std::move(copy), server]
+                    { handleAppendEntries(copy, server); });
 }
 
 void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int server)
@@ -505,6 +558,38 @@ void Raft::handleAppendEntries(const RaftRpc::AppendEntriesArgs &request, int se
 
     auto session = streamServer_.find(server);
     // 这里一定要检查responder的有效性 因为reactor指针是由grpc管的，随时可能delete
+    if (session != streamServer_.end() && session->second.AEResponder)
+        session->second.AEResponder->SendReply(&reply);
+}
+
+void Raft::handleReadHeartBeat(const RaftRpc::AppendEntriesArgs &request, int server)
+{
+    RaftRpc::AppendEntriesReply reply;
+    reply.set_succss(true);
+    reply.set_readround(request.readround());
+    if (request.term() > currentTerm_)
+        becomeFollower(request.term());
+    if (request.term() < currentTerm_)
+    {
+        reply.set_term(currentTerm_);
+        reply.set_succss(false);
+        reply.set_status(Expired);
+        reply.set_updatenextindex(100);
+    }
+    else
+    {
+        if (status_ != RaftRpc::RAFT_FOLLOWER)
+            status_ = RaftRpc::RAFT_FOLLOWER;
+        resetElectionDeadline();
+        resetLastLeaderContact();
+
+        reply.set_term(currentTerm_);
+        reply.set_status(Normal);
+        reply.set_updatenextindex(-100);
+
+        // no need to handle logs. because it's heartbeat, there's no logs
+    }
+    auto session = streamServer_.find(server);
     if (session != streamServer_.end() && session->second.AEResponder)
         session->second.AEResponder->SendReply(&reply);
 }
@@ -751,6 +836,8 @@ void Raft::becomeFollower(int term)
     resetElectionDeadline();
     // 不应该在这里重置
     // resetLastLeaderContact();
+    currentTermCommitted_ = false;
+    failAllPendingReadIndexInEventLoop();
 }
 
 void Raft::stepDown()
@@ -765,6 +852,8 @@ void Raft::stepDown()
     for (auto &entry : replicationInFlight_)
         entry.second = false;
     resetElectionDeadline();
+    currentTermCommitted_ = false;
+    failAllPendingReadIndexInEventLoop();
 }
 
 void Raft::becomeLeader()
@@ -783,7 +872,7 @@ void Raft::becomeLeader()
     }
     resetLeaderContactTimes(Clock::now());
     resetHeartbeatDeadline();
-    scheduleAllReplication();
+    appendNoopCommandInEventLoop();
 }
 
 void Raft::scheduleAllReplication()
@@ -792,6 +881,14 @@ void Raft::scheduleAllReplication()
         return;
     for (const auto &peer : peers_)
         scheduleReplication(peer.first);
+}
+
+void Raft::scheduleAllHeartBeat(uint64_t round)
+{
+    if (status_ != RaftRpc::RAFT_LEADER || stop_.load())
+        return;
+    for (const auto &peer : peers_)
+        scheduleHeartBeat(peer.first, round);
 }
 
 void Raft::scheduleReplication(int server)
@@ -818,7 +915,49 @@ void Raft::scheduleReplication(int server)
         launchSnapshot(server, std::move(request));
     }
     else
+    {
         launchAppendEntries(server, buildAppendEntries(server));
+    }
+}
+
+void Raft::scheduleHeartBeat(int server, uint64_t round)
+{
+    if (status_ != RaftRpc::RAFT_LEADER || stop_.load())
+        return;
+    if (!activeRead_.has_value() || activeRead_->round != round)
+        return;
+    // 此时已经inflight 把readRound添加到pending里
+    if (replicationInFlight_[server])
+    {
+        readIndexPending_[server] = round;
+        return;
+    }
+    replicationInFlight_[server] = true;
+
+    launchReadHeartBeat(server, buildReadHeartBeat(server, round));
+}
+
+void Raft::trySchedulePendingReadHeartBeat(int server)
+{
+    if (status_ != RaftRpc::RAFT_LEADER || stop_.load())
+        return;
+    auto it = readIndexPending_.find(server);
+    // there's no pending read
+    if (it == readIndexPending_.end() || it->second == 0)
+        return;
+    // activeReadIndex changed
+    if (!activeRead_.has_value() || activeRead_->round != it->second)
+    {
+        readIndexPending_[server] = 0;
+        return;
+    }
+
+    // replication request arrived
+    if (replicationInFlight_[server])
+        return;
+    auto round = readIndexPending_[server];
+    readIndexPending_[server] = 0;
+    scheduleHeartBeat(server, round);
 }
 
 void Raft::launchAppendEntries(int server, RaftRpc::AppendEntriesArgs request)
@@ -836,6 +975,23 @@ void Raft::launchAppendEntries(int server, RaftRpc::AppendEntriesArgs request)
         postControl([this, server, term = request.term(), request, ok, reply] {
             handleAppendReply(server, term, request, ok, reply);
         }); });
+}
+// TODO:
+void Raft::launchReadHeartBeat(int server, RaftRpc::AppendEntriesArgs request)
+{
+    threadPool_->submit(
+        [this, server, request = std::move(request)]()
+        {
+            RaftRpc::AppendEntriesReply reply;
+            grpc::ClientContext context;
+            context.AddMetadata("node-id", std::to_string(id_));
+            context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(AppendEntriesTimeOut));
+            auto stream = clients_.at(server)->CreateAppendEntriesStream(&context);
+            const bool ok = stream->Write(&request) && stream->Read(&reply);
+            stream->Close();
+            postControl([this, server, term = request.term(), ok, request, reply]
+                        { handleAppendReply(server, term, request, ok, reply); });
+        });
 }
 
 void Raft::handleAppendReply(int server, int requestTerm,
@@ -864,11 +1020,28 @@ void Raft::handleAppendReply(int server, int requestTerm,
     bool retry = false;
     if (reply.succss())
     {
-        matchIndex_[server] =
-            std::max(matchIndex_[server],
-                     request.prelogindex() + request.entries_size());
-        nextIndex_[server] = matchIndex_[server] + 1;
-        updateCommitIndex();
+        if (reply.has_readround() && reply.readround() > 0)
+        {
+            if (!activeRead_.has_value())
+                return;
+
+            if (activeRead_->term != requestTerm ||
+                activeRead_->round != reply.readround())
+                return;
+
+            activeRead_->acks.insert(server);
+
+            if (activeRead_->acks.size() >= quorumSize())
+                completeActiveReadInEventLoop();
+        }
+        else
+        {
+            matchIndex_[server] =
+                std::max(matchIndex_[server],
+                         request.prelogindex() + request.entries_size());
+            nextIndex_[server] = matchIndex_[server] + 1;
+            updateCommitIndex();
+        }
     }
     else
     {
@@ -882,9 +1055,20 @@ void Raft::handleAppendReply(int server, int requestTerm,
         retry = true;
     }
 
+    // readHeartBeat shouldn't use the replication meaning.if peer InFlight，and add read request，will enter the
+    // replication branch because there's no attribute of readRound in reply, then read request starving.
+
+    // replication preempt readHeartBeat
+
     if (retry || replicationPending_[server] ||
         nextIndex_[server] <= getLastLogIndex())
+    {
         scheduleReplication(server);
+    }
+    else
+    {
+        trySchedulePendingReadHeartBeat(server);
+    }
 }
 
 void Raft::launchSnapshot(int server, RaftRpc::InstallSnapshotArgs request)
@@ -946,6 +1130,75 @@ RaftRpc::AppendEntriesArgs Raft::buildAppendEntries(int server)
         *request.add_entries() = logs_[i];
     return request;
 }
+
+RaftRpc::AppendEntriesArgs Raft::buildReadHeartBeat(int server, uint64_t round)
+{
+    RaftRpc::AppendEntriesArgs request;
+    int previousIndex;
+    int previousTerm;
+    getPrevLogInfo(server, &previousIndex, &previousTerm);
+    request.set_term(currentTerm_);
+    request.set_leaderid(id_);
+    request.set_prelogindex(previousIndex);
+    request.set_prelogterm(previousTerm);
+    request.set_leadercommit(commitIndex_);
+    request.set_readround(round);
+    return request;
+}
+
+RaftRpc::LogEntry Raft::buildNoopCommand()
+{
+    RaftRpc::LogEntry entry;
+    entry.set_logindex(getNewCommandIndex());
+    entry.set_logterm(currentTerm_);
+    Op op;
+    op.operation = "NO-OP";
+    entry.set_command(op.asString());
+    return entry;
+}
+
+void Raft::appendNoopCommandInEventLoop()
+{
+    auto command = buildNoopCommand();
+    logs_.emplace_back(command);
+    persist();
+    scheduleAllReplication();
+}
+
+void Raft::failAllPendingReadIndexInEventLoop()
+{
+    if(!activeRead_.has_value())
+        return;
+    auto pending = std::move(*activeRead_);
+    activeRead_.reset();
+    for(const auto& callback: pending.callbacks)
+    {
+        callback(false, pending.round, pending.readIndex);
+    }
+    for(auto& entry: readIndexPending_)
+    {
+        if(entry.second == pending.round)
+            entry.second = 0;
+    }
+}
+
+void Raft::completeActiveReadInEventLoop()
+{
+    if(!activeRead_.has_value())
+        return;
+    auto pending = std::move(*activeRead_);
+    activeRead_.reset();
+    for(const auto& callback: pending.callbacks)
+    {
+        callback(true, pending.round, pending.readIndex);
+    }
+    for(auto& entry: readIndexPending_)
+    {
+        if(entry.second == pending.round)
+            entry.second = 0;
+    }
+}
+
 /*
     If there exists an N such that N > commitIndex, a majority
     of matchIndex[i] ≥ N, and log[N].term == currentTerm:
@@ -964,6 +1217,8 @@ void Raft::updateCommitIndex()
             getLogTermFromIndex(index) == currentTerm_)
         {
             commitIndex_ = index;
+            if (!currentTermCommitted_)
+                currentTermCommitted_ = true;
             break;
         }
     }
@@ -991,10 +1246,9 @@ bool Raft::needSnapshot(int lastApplied)
         [this, lastApplied]()
         {
             return commitIndex_ - lastIncludeSnapshotIndex_ >= SnapshotThreshold && lastApplied > lastIncludeSnapshotIndex_;
-        }
-    );
+        });
 }
-void Raft::snapshot(int lastApplied, const std::string& snapshot)
+void Raft::snapshot(int lastApplied, const std::string &snapshot)
 {
     std::promise<void> expectedPromise;
     auto future = expectedPromise.get_future();
@@ -1003,12 +1257,11 @@ void Raft::snapshot(int lastApplied, const std::string& snapshot)
         {
             doSnapshot(lastApplied, snapshot);
             expectedPromise.set_value();
-        }
-    );
+        });
     future.get();
 }
 
-void Raft::doSnapshot(int snapshotIndex, const std::string& snapshot)
+void Raft::doSnapshot(int snapshotIndex, const std::string &snapshot)
 {
     if (snapshotIndex <= lastIncludeSnapshotIndex_)
         return;

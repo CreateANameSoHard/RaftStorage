@@ -98,7 +98,7 @@ public:
     grpc::ServerUnaryReactor *PutAppend(grpc::CallbackServerContext * /*context*/, const ServerRpc::PutAppendArgs * /*request*/, ServerRpc::PutAppendReply * /*reply*/) override;
 
     void start();    // create server
-    void wait();     // block and listening for request
+    void wait();     // block and listening for request                     
     void shutDown(); // shutdown grpc server
 
     json debugDumpState();

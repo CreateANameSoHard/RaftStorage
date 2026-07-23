@@ -18,8 +18,9 @@ namespace
     std::string GET = "GET"; // select
     std::string PUT = "PUT"; // update or insert
     std::string DEL = "DEL"; // delete
+    std::string NO_OP = "NO-OP"; // no-op
 
-    std::vector<std::string> operations = {GET, PUT, DEL};
+    std::vector<std::string> operations = {GET, PUT, DEL, NO_OP};
 };
 
 ApplyResult KVServer::KVStateMachine::apply(const Op &op)
@@ -311,6 +312,7 @@ bool KVServer::postQuery(const std::function<void()> &func)
 
 void KVServer::completePending(ApplyMsg msg, ApplyResult result)
 {
+    // filter the no-op command
     if (result.clientId.empty() || !result.requestId)
         return;
 
